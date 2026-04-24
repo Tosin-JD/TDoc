@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.data.model.DocumentData
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(viewModel: EditorViewModel) {
     val uiState = viewModel.uiState.collectAsState().value
@@ -27,7 +29,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
         topBar = {
             TopAppBar(
                 title = {
-                    Text(document?.filename ?: "Document Editor")
+                    Text(document?.let { "Editing: ${it.filename}" } ?: "Document Editor")
                 }
             )
         }
@@ -46,7 +48,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
                     LoadingContent()
                 }
                 is EditorUiState.Success -> {
-                    SuccessContent(document, viewModel)
+                    SuccessContent(uiState.document, viewModel)
                 }
                 is EditorUiState.Error -> {
                     ErrorContent(uiState.message)
@@ -78,25 +80,23 @@ private fun LoadingContent() {
 
 @Composable
 private fun SuccessContent(document: DocumentData?, viewModel: EditorViewModel) {
-    if (document != null) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            TextField(
-                value = document.content,
-                onValueChange = { newContent ->
-                    viewModel.updateContent(newContent)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(bottom = 16.dp),
-                label = { Text("Document Content") }
-            )
-            Button(
-                onClick = { viewModel.saveDocument() },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Save")
-            }
+    Column(modifier = Modifier.fillMaxSize()) {
+        TextField(
+            value = viewModel.textContent,
+            onValueChange = { newContent ->
+                viewModel.updateContent(newContent)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(bottom = 16.dp),
+            label = { Text("Document Content") }
+        )
+        Button(
+            onClick = { viewModel.saveDocument() },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Save")
         }
     }
 }
