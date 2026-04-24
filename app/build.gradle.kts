@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    kotlin("kapt")
 }
 
 android {
@@ -34,6 +35,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    kapt {
+        correctErrorTypes = true
+    }
     buildFeatures {
         compose = true
     }
@@ -55,4 +59,10 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    
+    // Hilt Dependencies
+    implementation("com.google.dagger:hilt-android:2.51")
+    kapt("com.google.dagger:hilt-compiler:2.51")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 }
