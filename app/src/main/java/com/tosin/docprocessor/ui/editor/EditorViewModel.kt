@@ -4,6 +4,8 @@ import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tosin.docprocessor.data.model.DocumentData
@@ -25,7 +27,7 @@ class EditorViewModel @Inject constructor(
     private val documentRepository: DocumentRepository
 ) : ViewModel() {
 
-    var textContent by mutableStateOf("")
+    var editorState by mutableStateOf(TextFieldValue(AnnotatedString("")))
         private set
 
     var isSaving by mutableStateOf(false)
@@ -61,7 +63,7 @@ class EditorViewModel @Inject constructor(
                         format = fileName.substringAfterLast('.', "txt")
                     )
                     withContext(Dispatchers.Main) {
-                        textContent = text
+                        editorState = TextFieldValue(text)
                         _currentDocument.value = document
                         _uiState.value = EditorUiState.Success(document)
                     }
@@ -76,8 +78,8 @@ class EditorViewModel @Inject constructor(
         }
     }
 
-    fun updateContent(newText: String) {
-        textContent = newText
+    fun updateContent(newState: TextFieldValue) {
+        editorState = newState
     }
 
     fun saveCurrentFile() {
@@ -88,9 +90,9 @@ class EditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 isSaving = true
-                documentRepository.saveTextToUri(uri, textContent)
+                documentRepository.saveTextToUri(uri, editorState.annotatedString)
                 // Update the document state with latest content
-                _currentDocument.value = _currentDocument.value?.copy(content = textContent)
+                _currentDocument.value = _currentDocument.value?.copy(content = editorState.annotatedString)
                 _events.emit("File saved successfully!")
             } catch (e: Exception) {
                 _events.emit("Save failed: ${e.localizedMessage}")
@@ -112,7 +114,7 @@ class EditorViewModel @Inject constructor(
                 }
                 .collect { document ->
                     withContext(Dispatchers.Main) {
-                        textContent = document.content
+                        editorState = TextFieldValue(document.content)
                     }
                     _currentDocument.value = document
                     _uiState.value = EditorUiState.Success(document)
@@ -123,7 +125,7 @@ class EditorViewModel @Inject constructor(
 
     // Legacy save via Flow (for file-path-based documents)
     fun saveDocument() {
-        val document = _currentDocument.value?.copy(content = textContent) ?: run {
+        val document = _currentDocument.value?.copy(content = editorState.annotatedString) ?: run {
             viewModelScope.launch { _events.emit("No document to save.") }
             return
         }

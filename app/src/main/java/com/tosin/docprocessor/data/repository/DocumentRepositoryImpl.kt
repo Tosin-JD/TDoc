@@ -3,6 +3,7 @@ package com.tosin.docprocessor.data.repository
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.compose.ui.text.AnnotatedString
 import com.tosin.docprocessor.data.model.DocumentData
 import com.tosin.docprocessor.data.parser.DocxParser
 import com.tosin.docprocessor.data.parser.OdtParser
@@ -16,7 +17,7 @@ class DocumentRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context
 ) : DocumentRepository {
 
-    override suspend fun readTextFromUri(uri: Uri): String {
+    override suspend fun readTextFromUri(uri: Uri): AnnotatedString {
         val contentResolver = context.contentResolver
         val fileName = getFileName(uri)
 
@@ -24,18 +25,18 @@ class DocumentRepositoryImpl @Inject constructor(
             when {
                 fileName.endsWith(".docx", ignoreCase = true) -> DocxParser().parse(inputStream)
                 fileName.endsWith(".odt", ignoreCase = true) -> OdtParser().parse(inputStream)
-                else -> inputStream.bufferedReader().use { it.readText() }
+                else -> AnnotatedString(inputStream.bufferedReader().use { it.readText() })
             }
-        } ?: "Failed to open file"
+        } ?: AnnotatedString("Failed to open file")
     }
 
-    override suspend fun saveTextToUri(uri: Uri, content: String) {
+    override suspend fun saveTextToUri(uri: Uri, content: AnnotatedString) {
         val fileName = getFileName(uri)
         context.contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
             when {
                 fileName.endsWith(".docx", ignoreCase = true) -> DocxParser().save(outputStream, content)
                 fileName.endsWith(".odt", ignoreCase = true) -> OdtParser().save(outputStream, content)
-                else -> outputStream.bufferedWriter().use { it.write(content) }
+                else -> outputStream.bufferedWriter().use { it.write(content.text) }
             }
         } ?: throw IllegalStateException("Could not open output stream for URI: $uri")
     }
@@ -66,7 +67,7 @@ class DocumentRepositoryImpl @Inject constructor(
             when (document.format.lowercase()) {
                 "docx" -> DocxParser().save(outputStream, document.content)
                 "odt" -> OdtParser().save(outputStream, document.content)
-                else -> outputStream.bufferedWriter().use { it.write(document.content) }
+                else -> outputStream.bufferedWriter().use { it.write(document.content.text) }
             }
         }
         emit(Unit)
@@ -78,7 +79,7 @@ class DocumentRepositoryImpl @Inject constructor(
             when {
                 file.name.endsWith(".docx", ignoreCase = true) -> DocxParser().parse(inputStream)
                 file.name.endsWith(".odt", ignoreCase = true) -> OdtParser().parse(inputStream)
-                else -> inputStream.bufferedReader().use { it.readText() }
+                else -> AnnotatedString(inputStream.bufferedReader().use { it.readText() })
             }
         }
         return DocumentData(

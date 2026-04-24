@@ -102,7 +102,7 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                 .fillMaxSize()
         ) {
             TextField(
-                value = viewModel.textContent,
+                value = viewModel.editorState,
                 onValueChange = { viewModel.updateContent(it) },
                 modifier = Modifier
                     .fillMaxSize()
@@ -128,8 +128,8 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
     }
 
     // Auto-focus the text field when content is loaded
-    LaunchedEffect(viewModel.textContent) {
-        if (viewModel.textContent.isNotEmpty()) {
+    LaunchedEffect(viewModel.editorState.annotatedString.text) {
+        if (viewModel.editorState.annotatedString.text.isNotEmpty()) {
             try {
                 focusRequester.requestFocus()
             } catch (_: Exception) {
