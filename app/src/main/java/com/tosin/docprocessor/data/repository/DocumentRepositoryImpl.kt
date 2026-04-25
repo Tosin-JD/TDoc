@@ -10,6 +10,7 @@ import com.tosin.docprocessor.data.parser.OdtParser
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import org.apache.poi.xwpf.usermodel.XWPFDocument
 import java.io.File
 import javax.inject.Inject
 
@@ -88,5 +89,13 @@ class DocumentRepositoryImpl @Inject constructor(
             content = content,
             format = file.extension
         )
+    }
+
+    override suspend fun createNewDocument(uri: Uri) {
+        context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+            // Create a blank Word document structure
+            val doc = XWPFDocument()
+            doc.write(outputStream)
+        }
     }
 }

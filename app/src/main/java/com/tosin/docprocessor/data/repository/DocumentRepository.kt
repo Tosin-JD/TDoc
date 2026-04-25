@@ -12,4 +12,5 @@ interface DocumentRepository {
     fun loadDocument(filePath: String): Flow<DocumentData>
     fun saveDocument(document: DocumentData): Flow<Unit>
     suspend fun parseDocument(filePath: String): DocumentData
+    suspend fun createNewDocument(uri: Uri)
 }

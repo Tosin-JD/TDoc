@@ -8,6 +8,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tosin.docprocessor.data.local.RecentFile
+import com.tosin.docprocessor.data.local.RecentFileDao
 import com.tosin.docprocessor.data.model.DocumentData
 import com.tosin.docprocessor.data.repository.DocumentRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,7 +26,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class EditorViewModel @Inject constructor(
-    private val documentRepository: DocumentRepository
+    private val documentRepository: DocumentRepository,
+    private val recentFileDao: RecentFileDao
 ) : ViewModel() {
 
     var editorState by mutableStateOf(TextFieldValue(AnnotatedString("")))
@@ -62,6 +65,7 @@ class EditorViewModel @Inject constructor(
                         content = text,
                         format = fileName.substringAfterLast('.', "txt")
                     )
+                    recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))
                     withContext(Dispatchers.Main) {
                         editorState = TextFieldValue(text)
                         _currentDocument.value = document
@@ -143,6 +147,45 @@ class EditorViewModel @Inject constructor(
                     _events.emit("File saved successfully!")
                     isSaving = false
                 }
+        }
+    }
+
+    fun onFileCreated(uri: Uri?) {
+        uri?.let {
+            viewModelScope.launch(Dispatchers.IO) {
+                // 1. Create the physical file
+                documentRepository.createNewDocument(it)
+                val fileName = documentRepository.getFileName(it)
+                recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))
+                // 2. Set it as the current working file
+                withContext(Dispatchers.Main) {
+                    currentUri = it
+                    editorState = TextFieldValue(AnnotatedString("")) // Clear editor for the new doc
+                }
+                _events.emit("New document created")
+            }
+        }
+    }
+
+    fun onSaveAs(uri: Uri?) {
+        uri?.let {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    isSaving = true
+                    // Save current content to the NEW location
+                    documentRepository.saveTextToUri(it, editorState.annotatedString)
+                    val fileName = documentRepository.getFileName(it)
+                    recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))
+                    withContext(Dispatchers.Main) {
+                        currentUri = it
+                    }
+                    _events.emit("File saved successfully!")
+                } catch (e: Exception) {
+                    _events.emit("Save failed: ${e.localizedMessage}")
+                } finally {
+                    isSaving = false
+                }
+            }
         }
     }
 }
