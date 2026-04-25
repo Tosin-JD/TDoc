@@ -77,8 +77,8 @@ class DocxParser : DocumentParser {
             if (run.isItalic) {
                 builder.addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, end)
             }
-            if (run.fontSize > 0) {
-                builder.addStyle(SpanStyle(fontSize = run.fontSize.sp), start, end)
+            if (run.fontSizeAsDouble > 0) {
+                builder.addStyle(SpanStyle(fontSize = run.fontSizeAsDouble.sp), start, end)
             }
         }
         return builder.toAnnotatedString()
