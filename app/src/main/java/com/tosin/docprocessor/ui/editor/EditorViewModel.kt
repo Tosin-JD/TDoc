@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.tosin.docprocessor.data.local.RecentFile
 import com.tosin.docprocessor.data.local.RecentFileDao
 import com.tosin.docprocessor.data.model.DocumentData
+import com.tosin.docprocessor.data.model.DocumentElement
 import com.tosin.docprocessor.data.repository.DocumentRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +31,7 @@ class EditorViewModel @Inject constructor(
     private val recentFileDao: RecentFileDao
 ) : ViewModel() {
 
-    var editorState by mutableStateOf(TextFieldValue(AnnotatedString("")))
+    var documentElements by mutableStateOf<List<DocumentElement>>(emptyList())
         private set
 
     var isSaving by mutableStateOf(false)
@@ -58,16 +59,16 @@ class EditorViewModel @Inject constructor(
                 isLoading = true
                 _uiState.value = EditorUiState.Loading
                 try {
-                    val text = documentRepository.readTextFromUri(it)
+                    val elements = documentRepository.readDocumentFromUri(it)
                     val fileName = documentRepository.getFileName(it)
                     val document = DocumentData(
                         filename = fileName,
-                        content = text,
+                        content = elements,
                         format = fileName.substringAfterLast('.', "txt")
                     )
                     recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))
                     withContext(Dispatchers.Main) {
-                        editorState = TextFieldValue(text)
+                        documentElements = elements
                         _currentDocument.value = document
                         _uiState.value = EditorUiState.Success(document)
                     }
@@ -82,8 +83,15 @@ class EditorViewModel @Inject constructor(
         }
     }
 
-    fun updateContent(newState: TextFieldValue) {
-        editorState = newState
+    fun updateParagraph(index: Int, newContent: AnnotatedString) {
+        val currentList = documentElements.toMutableList()
+        if (index in currentList.indices) {
+            val element = currentList[index]
+            if (element is DocumentElement.Paragraph) {
+                currentList[index] = element.copy(content = newContent)
+                documentElements = currentList
+            }
+        }
     }
 
     fun saveCurrentFile() {
@@ -94,9 +102,9 @@ class EditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 isSaving = true
-                documentRepository.saveTextToUri(uri, editorState.annotatedString)
+                documentRepository.saveDocumentToUri(uri, documentElements)
                 // Update the document state with latest content
-                _currentDocument.value = _currentDocument.value?.copy(content = editorState.annotatedString)
+                _currentDocument.value = _currentDocument.value?.copy(content = documentElements)
                 _events.emit("File saved successfully!")
             } catch (e: Exception) {
                 _events.emit("Save failed: ${e.localizedMessage}")
@@ -118,7 +126,7 @@ class EditorViewModel @Inject constructor(
                 }
                 .collect { document ->
                     withContext(Dispatchers.Main) {
-                        editorState = TextFieldValue(document.content)
+                        documentElements = document.content
                     }
                     _currentDocument.value = document
                     _uiState.value = EditorUiState.Success(document)
@@ -129,7 +137,7 @@ class EditorViewModel @Inject constructor(
 
     // Legacy save via Flow (for file-path-based documents)
     fun saveDocument() {
-        val document = _currentDocument.value?.copy(content = editorState.annotatedString) ?: run {
+        val document = _currentDocument.value?.copy(content = documentElements) ?: run {
             viewModelScope.launch { _events.emit("No document to save.") }
             return
         }
@@ -160,7 +168,7 @@ class EditorViewModel @Inject constructor(
                 // 2. Set it as the current working file
                 withContext(Dispatchers.Main) {
                     currentUri = it
-                    editorState = TextFieldValue(AnnotatedString("")) // Clear editor for the new doc
+                    documentElements = emptyList<DocumentElement>() // Clear editor for the new doc
                 }
                 _events.emit("New document created")
             }
@@ -173,7 +181,7 @@ class EditorViewModel @Inject constructor(
                 try {
                     isSaving = true
                     // Save current content to the NEW location
-                    documentRepository.saveTextToUri(it, editorState.annotatedString)
+                    documentRepository.saveDocumentToUri(it, documentElements)
                     val fileName = documentRepository.getFileName(it)
                     recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))
                     withContext(Dispatchers.Main) {

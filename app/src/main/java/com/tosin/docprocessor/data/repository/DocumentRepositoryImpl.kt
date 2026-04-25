@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.ui.text.AnnotatedString
 import com.tosin.docprocessor.data.model.DocumentData
+import com.tosin.docprocessor.data.model.DocumentElement
 import com.tosin.docprocessor.data.parser.DocxParser
 import com.tosin.docprocessor.data.parser.OdtParser
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -18,7 +19,7 @@ class DocumentRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context
 ) : DocumentRepository {
 
-    override suspend fun readTextFromUri(uri: Uri): AnnotatedString {
+    override suspend fun readDocumentFromUri(uri: Uri): List<DocumentElement> {
         val contentResolver = context.contentResolver
         val fileName = getFileName(uri)
 
@@ -26,18 +27,22 @@ class DocumentRepositoryImpl @Inject constructor(
             when {
                 fileName.endsWith(".docx", ignoreCase = true) -> DocxParser().parse(inputStream)
                 fileName.endsWith(".odt", ignoreCase = true) -> OdtParser().parse(inputStream)
-                else -> AnnotatedString(inputStream.bufferedReader().use { it.readText() })
+                else -> listOf(DocumentElement.Paragraph(AnnotatedString(inputStream.bufferedReader().use { it.readText() })))
             }
-        } ?: AnnotatedString("Failed to open file")
+        } ?: listOf(DocumentElement.Paragraph(AnnotatedString("Failed to open file")))
     }
 
-    override suspend fun saveTextToUri(uri: Uri, content: AnnotatedString) {
+    override suspend fun saveDocumentToUri(uri: Uri, content: List<DocumentElement>) {
         val fileName = getFileName(uri)
         context.contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
             when {
                 fileName.endsWith(".docx", ignoreCase = true) -> DocxParser().save(outputStream, content)
                 fileName.endsWith(".odt", ignoreCase = true) -> OdtParser().save(outputStream, content)
-                else -> outputStream.bufferedWriter().use { it.write(content.text) }
+                else -> {
+                    val fullText = content.filterIsInstance<DocumentElement.Paragraph>()
+                        .joinToString("\n") { it.content.text }
+                    outputStream.bufferedWriter().use { it.write(fullText) }
+                }
             }
         } ?: throw IllegalStateException("Could not open output stream for URI: $uri")
     }
@@ -68,7 +73,11 @@ class DocumentRepositoryImpl @Inject constructor(
             when (document.format.lowercase()) {
                 "docx" -> DocxParser().save(outputStream, document.content)
                 "odt" -> OdtParser().save(outputStream, document.content)
-                else -> outputStream.bufferedWriter().use { it.write(document.content.text) }
+                else -> {
+                    val fullText = document.content.filterIsInstance<DocumentElement.Paragraph>()
+                        .joinToString("\n") { it.content.text }
+                    outputStream.bufferedWriter().use { it.write(fullText) }
+                }
             }
         }
         emit(Unit)
@@ -80,7 +89,7 @@ class DocumentRepositoryImpl @Inject constructor(
             when {
                 file.name.endsWith(".docx", ignoreCase = true) -> DocxParser().parse(inputStream)
                 file.name.endsWith(".odt", ignoreCase = true) -> OdtParser().parse(inputStream)
-                else -> AnnotatedString(inputStream.bufferedReader().use { it.readText() })
+                else -> listOf(DocumentElement.Paragraph(AnnotatedString(inputStream.bufferedReader().use { it.readText() })))
             }
         }
         return DocumentData(
