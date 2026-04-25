@@ -1,50 +1,61 @@
 package com.tosin.docprocessor.data.parser.odt
 
-import androidx.compose.ui.text.AnnotatedString
-import com.tosin.docprocessor.data.model.DocumentElement
+import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.parser.DocumentParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.odftoolkit.odfdom.doc.OdfTextDocument
-import org.w3c.dom.Node
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.zip.ZipInputStream
 
-class OdtParser : DocumentParser {
-    override fun parse(inputStream: InputStream): List<DocumentElement> {
-        return try {
-            val odtDoc = OdfTextDocument.loadDocument(inputStream)
-            val contentRoot = odtDoc.contentRoot
-            val sb = StringBuilder()
-            extractText(contentRoot, sb)
-            listOf(DocumentElement.Paragraph(AnnotatedString(sb.toString().trim())))
-        } catch (e: Exception) {
-            listOf(DocumentElement.Paragraph(androidx.compose.ui.text.AnnotatedString("Error parsing ODT document: ${e.message}")))
-        }
-    }
+class OdtParser(
+    private val xmlParser: OdtXmlParser = OdtXmlParser()
+) : DocumentParser {
 
-    private fun extractText(node: Node, sb: StringBuilder) {
-        if (node.nodeType == Node.TEXT_NODE) {
-            sb.append(node.textContent)
-        }
-        val childNodes = node.childNodes
-        for (i in 0 until childNodes.length) {
-            val child = childNodes.item(i)
-            val localName = child.localName
-            // Add newline after paragraph elements
-            if (localName == "p" || localName == "h") {
-                extractText(child, sb)
-                sb.append("\n")
-            } else {
-                extractText(child, sb)
+    override suspend fun parse(inputStream: InputStream): Result<List<DocumentElement>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val elements = mutableListOf<DocumentElement>()
+                ZipInputStream(inputStream).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (entry.name == "content.xml") {
+                            val xml = zip.readBytes().decodeToString()
+                            elements += xmlParser.parse(xml)
+                            break
+                        }
+                        entry = zip.nextEntry
+                    }
+                }
+                Result.success(elements)
+            } catch (e: Exception) {
+                Result.failure(e)
             }
         }
-    }
 
-    override fun save(outputStream: OutputStream, content: List<DocumentElement>) {
-        val odtDoc = OdfTextDocument.newTextDocument()
-        // Concatenate all paragraph text for simple ODT saving
-        val fullText = content.filterIsInstance<DocumentElement.Paragraph>()
-            .joinToString("\n") { it.content.text }
-        odtDoc.addText(fullText)
-        odtDoc.save(outputStream)
-    }
+    override suspend fun save(outputStream: OutputStream, content: List<DocumentElement>): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val odtDoc = OdfTextDocument.newTextDocument()
+                content.forEach { element ->
+                    when (element) {
+                        is DocumentElement.Paragraph -> odtDoc.addText(element.spans.joinToString("") { it.text } + "\n")
+                        is DocumentElement.SectionHeader -> odtDoc.addText(element.text + "\n")
+                        is DocumentElement.Table -> {
+                            val tableText = element.rows.joinToString("\n") { row -> row.joinToString("\t") }
+                            odtDoc.addText(tableText + "\n")
+                        }
+                        is DocumentElement.Image -> {
+                            element.caption?.takeIf { it.isNotBlank() }?.let { odtDoc.addText(it + "\n") }
+                        }
+                        DocumentElement.PageBreak -> odtDoc.addText("\n")
+                    }
+                }
+                odtDoc.save(outputStream)
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
 }

@@ -1,4 +1,4 @@
-package com.tosin.docprocessor.data.model
+package com.tosin.docprocessor.data.common.model
 
 
 enum class ViewMode {

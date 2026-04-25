@@ -5,13 +5,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.tosin.docprocessor.data.local.RecentFile
-import com.tosin.docprocessor.data.local.RecentFileDao
-import com.tosin.docprocessor.data.model.DocumentData
-import com.tosin.docprocessor.data.model.DocumentElement
+import com.tosin.docprocessor.data.common.model.DocumentData
+import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.data.local.dao.RecentFileDao
+import com.tosin.docprocessor.data.local.entities.RecentFile
+import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import com.tosin.docprocessor.data.repository.DocumentRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -46,7 +46,6 @@ class EditorViewModel @Inject constructor(
     private val _currentDocument = MutableStateFlow<DocumentData?>(null)
     val currentDocument: StateFlow<DocumentData?> = _currentDocument.asStateFlow()
 
-    // One-time event channel for Snackbar messages
     private val _events = MutableSharedFlow<String>()
     val events = _events.asSharedFlow()
 
@@ -88,7 +87,16 @@ class EditorViewModel @Inject constructor(
         if (index in currentList.indices) {
             val element = currentList[index]
             if (element is DocumentElement.Paragraph) {
-                currentList[index] = element.copy(content = newContent)
+                currentList[index] = element.copy(
+                    spans = listOf(
+                        TextSpan(
+                            text = newContent.text,
+                            isBold = false,
+                            isItalic = false,
+                            color = "000000"
+                        )
+                    )
+                )
                 documentElements = currentList
             }
         }
@@ -103,7 +111,6 @@ class EditorViewModel @Inject constructor(
             try {
                 isSaving = true
                 documentRepository.saveDocumentToUri(uri, documentElements)
-                // Update the document state with latest content
                 _currentDocument.value = _currentDocument.value?.copy(content = documentElements)
                 _events.emit("File saved successfully!")
             } catch (e: Exception) {
@@ -135,7 +142,6 @@ class EditorViewModel @Inject constructor(
         }
     }
 
-    // Legacy save via Flow (for file-path-based documents)
     fun saveDocument() {
         val document = _currentDocument.value?.copy(content = documentElements) ?: run {
             viewModelScope.launch { _events.emit("No document to save.") }
@@ -161,14 +167,12 @@ class EditorViewModel @Inject constructor(
     fun onFileCreated(uri: Uri?) {
         uri?.let {
             viewModelScope.launch(Dispatchers.IO) {
-                // 1. Create the physical file
                 documentRepository.createNewDocument(it)
                 val fileName = documentRepository.getFileName(it)
                 recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))
-                // 2. Set it as the current working file
                 withContext(Dispatchers.Main) {
                     currentUri = it
-                    documentElements = emptyList<DocumentElement>() // Clear editor for the new doc
+                    documentElements = emptyList()
                 }
                 _events.emit("New document created")
             }
@@ -180,7 +184,6 @@ class EditorViewModel @Inject constructor(
             viewModelScope.launch(Dispatchers.IO) {
                 try {
                     isSaving = true
-                    // Save current content to the NEW location
                     documentRepository.saveDocumentToUri(it, documentElements)
                     val fileName = documentRepository.getFileName(it)
                     recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))

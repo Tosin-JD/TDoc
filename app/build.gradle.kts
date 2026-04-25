@@ -66,11 +66,6 @@ dependencies {
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
-    // Room Dependencies
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
-
     implementation("org.apache.poi:poi-ooxml:5.2.3")
     implementation("org.odftoolkit:odfdom-java:0.12.0")
 }

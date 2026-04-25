@@ -1,7 +1,4 @@
-package com.tosin.docprocessor.data.model
-
-import androidx.compose.ui.text.AnnotatedString
-import com.tosin.docprocessor.data.model.DocumentElement
+package com.tosin.docprocessor.data.common.model
 
 data class DocumentData(
     val id: String = "",

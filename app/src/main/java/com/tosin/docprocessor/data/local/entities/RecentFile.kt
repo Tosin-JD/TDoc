@@ -1,11 +1,9 @@
 package com.tosin.docprocessor.data.local.entities
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
-
-@Entity(tableName = "recent_files")
 data class RecentFile(
-    @PrimaryKey val uri: String,
+    val uri: String,
     val fileName: String,
+    val mimeType: String = "",
+    val fileSize: Long = 0L,
     val lastAccessed: Long = System.currentTimeMillis()
 )

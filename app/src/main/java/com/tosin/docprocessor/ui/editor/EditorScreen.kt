@@ -34,8 +34,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.tosin.docprocessor.data.model.MimeTypes
-import com.tosin.docprocessor.data.model.ViewMode
+import com.tosin.docprocessor.data.common.model.MimeTypes
+import com.tosin.docprocessor.data.common.model.ViewMode
 import com.tosin.docprocessor.ui.components.FormattingToolbar
 import com.tosin.docprocessor.ui.editor.layouts.MobileLayout
 import com.tosin.docprocessor.ui.editor.layouts.PrintLayout
@@ -47,26 +47,28 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
     val snackbarHostState = remember { SnackbarHostState() }
     val focusRequester = remember { FocusRequester() }
 
-    // Listen for one-time events from the ViewModel (success/error messages)
     LaunchedEffect(Unit) {
         viewModel.events.collect { message ->
             snackbarHostState.showSnackbar(message)
         }
     }
 
-    // This is the "Logic Bridge" to the Android System Picker
+    LaunchedEffect(viewModel.documentElements.isNotEmpty()) {
+        if (viewModel.documentElements.isNotEmpty()) {
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri -> viewModel.onFilePicked(uri) }
     )
 
-    // Launcher for creating a brand-new blank file
     val createDocLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(MimeTypes.DOCX),
         onResult = { uri -> viewModel.onFileCreated(uri) }
     )
 
-    // Launcher for "Save As" (saving current text to a new file)
     val saveAsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(MimeTypes.DOCX),
         onResult = { uri -> viewModel.onSaveAs(uri) }
@@ -90,12 +92,13 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                         Icon(imageVector = Icons.Default.Add, contentDescription = "New")
                     }
                     IconButton(onClick = {
-                        // Trigger picker for .docx and .odt
-                        filePickerLauncher.launch(arrayOf(
-                            MimeTypes.DOCX,
-                            MimeTypes.ODT,
-                            "text/plain"
-                        ))
+                        filePickerLauncher.launch(
+                            arrayOf(
+                                MimeTypes.DOCX,
+                                MimeTypes.ODT,
+                                "text/plain"
+                            )
+                        )
                     }) {
                         Icon(imageVector = Icons.Default.Search, contentDescription = "Open File")
                     }
@@ -128,7 +131,6 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                     ViewMode.PRINT -> PrintLayout(viewModel, focusRequester)
                 }
 
-                // Loading overlay
                 if (viewModel.isLoading || viewModel.isSaving) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -144,15 +146,6 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                 onItalicClick = { /* TODO */ },
                 modifier = Modifier.imePadding()
             )
-                // Autofocus logic simplified for block editor
-                LaunchedEffect(viewModel.documentElements.isNotEmpty()) {
-                    if (viewModel.documentElements.isNotEmpty()) {
-                        try {
-                            focusRequester.requestFocus()
-                        } catch (_: Exception) {
-                        }
-                    }
-                }
-            }
         }
     }
+}

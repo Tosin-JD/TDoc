@@ -1,6 +1,6 @@
 package com.tosin.docprocessor.ui.editor
 
-import com.tosin.docprocessor.data.model.DocumentData
+import com.tosin.docprocessor.data.common.model.DocumentData
 
 sealed class EditorUiState {
     object Idle : EditorUiState()

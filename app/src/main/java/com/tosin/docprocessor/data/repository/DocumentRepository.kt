@@ -1,8 +1,8 @@
 package com.tosin.docprocessor.data.repository
 
 import android.net.Uri
-import com.tosin.docprocessor.data.model.DocumentData
-import com.tosin.docprocessor.data.model.DocumentElement
+import com.tosin.docprocessor.data.common.model.DocumentData
+import com.tosin.docprocessor.data.common.model.DocumentElement
 import kotlinx.coroutines.flow.Flow
 
 interface DocumentRepository {

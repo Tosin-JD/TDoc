@@ -3,46 +3,46 @@ package com.tosin.docprocessor.data.repository
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.compose.ui.text.AnnotatedString
-import com.tosin.docprocessor.data.model.DocumentData
-import com.tosin.docprocessor.data.model.DocumentElement
-import com.tosin.docprocessor.data.parser.DocxParser
-import com.tosin.docprocessor.data.parser.OdtParser
+import com.tosin.docprocessor.data.common.model.DocumentData
+import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.data.common.model.MimeTypes
+import com.tosin.docprocessor.data.parser.ParserFactory
+import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import org.apache.poi.xwpf.usermodel.XWPFDocument
 import java.io.File
 import javax.inject.Inject
 
 class DocumentRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context,
+    private val parserFactory: ParserFactory
 ) : DocumentRepository {
 
     override suspend fun readDocumentFromUri(uri: Uri): List<DocumentElement> {
         val contentResolver = context.contentResolver
         val fileName = getFileName(uri)
+        val mimeType = contentResolver.getType(uri) ?: MimeTypes.fromExtension(fileName.substringAfterLast('.', "")) ?: ""
 
         return contentResolver.openInputStream(uri)?.use { inputStream ->
-            when {
-                fileName.endsWith(".docx", ignoreCase = true) -> DocxParser().parse(inputStream)
-                fileName.endsWith(".odt", ignoreCase = true) -> OdtParser().parse(inputStream)
-                else -> listOf(DocumentElement.Paragraph(AnnotatedString(inputStream.bufferedReader().use { it.readText() })))
-            }
-        } ?: listOf(DocumentElement.Paragraph(AnnotatedString("Failed to open file")))
+            parseStream(inputStream, mimeType)
+        } ?: plainTextDocument("Failed to open file")
     }
 
     override suspend fun saveDocumentToUri(uri: Uri, content: List<DocumentElement>) {
         val fileName = getFileName(uri)
+        val mimeType = context.contentResolver.getType(uri)
+            ?: MimeTypes.fromExtension(fileName.substringAfterLast('.', ""))
+            ?: ""
         context.contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
-            when {
-                fileName.endsWith(".docx", ignoreCase = true) -> DocxParser().save(outputStream, content)
-                fileName.endsWith(".odt", ignoreCase = true) -> OdtParser().save(outputStream, content)
-                else -> {
-                    val fullText = content.filterIsInstance<DocumentElement.Paragraph>()
-                        .joinToString("\n") { it.content.text }
-                    outputStream.bufferedWriter().use { it.write(fullText) }
-                }
+            val parser = parserFactory.createParser(mimeType)
+            if (parser != null) {
+                parser.save(outputStream, content).getOrThrow()
+            } else {
+                outputStream.bufferedWriter().use { it.write(content.toPlainText()) }
             }
         } ?: throw IllegalStateException("Could not open output stream for URI: $uri")
     }
@@ -70,35 +70,31 @@ class DocumentRepositoryImpl @Inject constructor(
     override fun saveDocument(document: DocumentData): Flow<Unit> = flow {
         val file = File(document.id.ifEmpty { document.filename })
         file.outputStream().use { outputStream ->
-            when (document.format.lowercase()) {
-                "docx" -> DocxParser().save(outputStream, document.content)
-                "odt" -> OdtParser().save(outputStream, document.content)
-                else -> {
-                    val fullText = document.content.filterIsInstance<DocumentElement.Paragraph>()
-                        .joinToString("\n") { it.content.text }
-                    outputStream.bufferedWriter().use { it.write(fullText) }
-                }
+            val mimeType = MimeTypes.fromExtension(document.format.lowercase()).orEmpty()
+            val parser = parserFactory.createParser(mimeType)
+            if (parser != null) {
+                parser.save(outputStream, document.content).getOrThrow()
+            } else {
+                outputStream.bufferedWriter().use { it.write(document.content.toPlainText()) }
             }
         }
         emit(Unit)
     }
 
-    override suspend fun parseDocument(filePath: String): DocumentData {
-        val file = File(filePath)
-        val content = file.inputStream().use { inputStream ->
-            when {
-                file.name.endsWith(".docx", ignoreCase = true) -> DocxParser().parse(inputStream)
-                file.name.endsWith(".odt", ignoreCase = true) -> OdtParser().parse(inputStream)
-                else -> listOf(DocumentElement.Paragraph(AnnotatedString(inputStream.bufferedReader().use { it.readText() })))
-            }
+    override suspend fun parseDocument(filePath: String): DocumentData =
+        withContext(Dispatchers.IO) {
+            val file = File(filePath)
+            val fileName = file.name
+            val mimeType = MimeTypes.fromExtension(file.extension).orEmpty()
+            val content = file.inputStream().use { inputStream -> parseStream(inputStream, mimeType) }
+
+            DocumentData(
+                id = file.absolutePath,
+                filename = fileName,
+                content = content,
+                format = file.extension
+            )
         }
-        return DocumentData(
-            id = file.nameWithoutExtension,
-            filename = file.name,
-            content = content,
-            format = file.extension
-        )
-    }
 
     override suspend fun createNewDocument(uri: Uri) {
         context.contentResolver.openOutputStream(uri)?.use { outputStream ->
@@ -107,4 +103,33 @@ class DocumentRepositoryImpl @Inject constructor(
             doc.write(outputStream)
         }
     }
+
+    private suspend fun parseStream(
+        inputStream: java.io.InputStream,
+        mimeType: String
+    ): List<DocumentElement> {
+        val parser = parserFactory.createParser(mimeType)
+        return parser?.parse(inputStream)?.getOrThrow()
+            ?: plainTextDocument(inputStream.bufferedReader().use { it.readText() })
+    }
+
+    private fun plainTextDocument(text: String): List<DocumentElement> =
+        listOf(DocumentElement.Paragraph(spans = listOf(TextSpan(text = text, isBold = false, isItalic = false, color = "000000"))))
+
+    private fun List<DocumentElement>.toPlainText(): String =
+        joinToString("\n") { element ->
+            when (element) {
+                is DocumentElement.Paragraph -> buildString {
+                    element.listLabel?.let {
+                        append(it)
+                        append(' ')
+                    }
+                    append(element.spans.joinToString("") { it.text })
+                }
+                is DocumentElement.SectionHeader -> element.text
+                is DocumentElement.Table -> element.rows.joinToString("\n") { row -> row.joinToString("\t") }
+                is DocumentElement.Image -> element.caption ?: element.altText.orEmpty()
+                DocumentElement.PageBreak -> ""
+            }
+        }
 }

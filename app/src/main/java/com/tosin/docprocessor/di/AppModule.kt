@@ -1,9 +1,9 @@
 package com.tosin.docprocessor.di
 
 import android.content.Context
-import androidx.room.Room
-import com.tosin.docprocessor.data.local.AppDatabase
-import com.tosin.docprocessor.data.local.RecentFileDao
+import com.tosin.docprocessor.data.local.dao.RecentFileDao
+import com.tosin.docprocessor.data.local.dao.SharedPrefsRecentFileDao
+import com.tosin.docprocessor.data.parser.ParserFactory
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -20,22 +20,13 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDocumentRepository(
-        @ApplicationContext context: Context
-    ): DocumentRepository = DocumentRepositoryImpl(context)
+        @ApplicationContext context: Context,
+        parserFactory: ParserFactory
+    ): DocumentRepository = DocumentRepositoryImpl(context, parserFactory)
 
     @Provides
     @Singleton
-    fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
-        return Room.databaseBuilder(
-            context,
-            AppDatabase::class.java,
-            "tdoc_database"
-        ).build()
-    }
-
-    @Provides
-    @Singleton
-    fun provideRecentFileDao(database: AppDatabase): RecentFileDao {
-        return database.recentFileDao()
+    fun provideRecentFileDao(@ApplicationContext context: Context): RecentFileDao {
+        return SharedPrefsRecentFileDao(context)
     }
 }
