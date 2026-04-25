@@ -1,8 +1,10 @@
-package com.tosin.docprocessor.data.parser
+package com.tosin.docprocessor.data.parser.odt
 
 import androidx.compose.ui.text.AnnotatedString
 import com.tosin.docprocessor.data.model.DocumentElement
+import com.tosin.docprocessor.data.parser.DocumentParser
 import org.odftoolkit.odfdom.doc.OdfTextDocument
+import org.w3c.dom.Node
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -15,12 +17,12 @@ class OdtParser : DocumentParser {
             extractText(contentRoot, sb)
             listOf(DocumentElement.Paragraph(AnnotatedString(sb.toString().trim())))
         } catch (e: Exception) {
-            listOf(DocumentElement.Paragraph(AnnotatedString("Error parsing ODT document: ${e.message}")))
+            listOf(DocumentElement.Paragraph(androidx.compose.ui.text.AnnotatedString("Error parsing ODT document: ${e.message}")))
         }
     }
 
-    private fun extractText(node: org.w3c.dom.Node, sb: StringBuilder) {
-        if (node.nodeType == org.w3c.dom.Node.TEXT_NODE) {
+    private fun extractText(node: Node, sb: StringBuilder) {
+        if (node.nodeType == Node.TEXT_NODE) {
             sb.append(node.textContent)
         }
         val childNodes = node.childNodes
