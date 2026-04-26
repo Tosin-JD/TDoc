@@ -113,9 +113,19 @@ fun DocumentElementRenderer(element: DocumentElement, index: Int, viewModel: Edi
 
         is DocumentElement.Comment -> MetadataText("comment by ${element.info.author ?: "unknown"}: ${element.info.text}")
 
-        is DocumentElement.Bookmark -> MetadataText("bookmark: ${element.info.name}")
+        is DocumentElement.Bookmark -> MetadataText(
+            "bookmark ${element.info.boundary.name.lowercase()}: ${element.info.name.ifBlank { element.info.id }}"
+        )
 
         is DocumentElement.Field -> MetadataText("field ${element.info.type}: ${element.info.instruction}")
+
+        is DocumentElement.Metadata -> MetadataText(
+            buildString {
+                append(element.info.title ?: element.info.kind)
+                append(": ")
+                append(element.info.summary)
+            }
+        )
 
         is DocumentElement.Drawing -> MetadataText("drawing: ${element.info.kind}")
 

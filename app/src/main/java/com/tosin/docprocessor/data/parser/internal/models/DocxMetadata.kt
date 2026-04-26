@@ -51,7 +51,10 @@ data class HeaderFooterContent(
     val variant: String,
     val text: String,
     val paragraphCount: Int,
-    val tableCount: Int
+    val tableCount: Int,
+    val elementSummaries: List<String> = emptyList(),
+    val containsWatermark: Boolean = false,
+    val watermarkDescriptions: List<String> = emptyList()
 )
 
 enum class HeaderFooterKind {
@@ -80,14 +83,32 @@ data class CommentInfo(
 
 data class BookmarkInfo(
     val id: String,
-    val name: String
+    val name: String,
+    val boundary: BookmarkBoundary = BookmarkBoundary.START,
+    val source: String? = null
 )
+
+enum class BookmarkBoundary {
+    START,
+    END
+}
 
 data class FieldInfo(
     val type: String,
     val instruction: String,
     val value: String? = null,
-    val isSimpleField: Boolean = false
+    val isSimpleField: Boolean = false,
+    val arguments: Map<String, String> = emptyMap(),
+    val source: String? = null
+)
+
+data class MetadataInfo(
+    val kind: String,
+    val title: String? = null,
+    val summary: String,
+    val attributes: Map<String, String> = emptyMap(),
+    val children: List<MetadataInfo> = emptyList(),
+    val source: String? = null
 )
 
 data class DrawingInfo(
@@ -101,7 +122,11 @@ data class DrawingInfo(
     val positionY: String? = null,
     val wrapStyle: String? = null,
     val hasChart: Boolean = false,
-    val hasSmartArt: Boolean = false
+    val hasSmartArt: Boolean = false,
+    val rotation: Int? = null,
+    val effects: List<String> = emptyList(),
+    val isGrouped: Boolean = false,
+    val hasText: Boolean = false
 )
 
 data class EmbeddedObjectInfo(

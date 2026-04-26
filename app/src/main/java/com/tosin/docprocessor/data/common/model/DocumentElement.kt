@@ -8,6 +8,7 @@ import com.tosin.docprocessor.data.parser.internal.models.FieldInfo
 import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterContent
 import com.tosin.docprocessor.data.parser.internal.models.HyperlinkInfo
 import com.tosin.docprocessor.data.parser.internal.models.ListInfo
+import com.tosin.docprocessor.data.parser.internal.models.MetadataInfo
 import com.tosin.docprocessor.data.parser.internal.models.NoteInfo
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import com.tosin.docprocessor.data.parser.internal.models.SectionProperties
@@ -43,6 +44,7 @@ sealed class DocumentElement {
     data class Comment(val info: CommentInfo) : DocumentElement()
     data class Bookmark(val info: BookmarkInfo) : DocumentElement()
     data class Field(val info: FieldInfo) : DocumentElement()
+    data class Metadata(val info: MetadataInfo) : DocumentElement()
     data class Drawing(val info: DrawingInfo) : DocumentElement()
     data class EmbeddedObject(val info: EmbeddedObjectInfo) : DocumentElement()
 

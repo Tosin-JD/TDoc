@@ -48,6 +48,9 @@ class OdtParser(
                         is DocumentElement.Comment -> odtDoc.addText(element.info.text + "\n")
                         is DocumentElement.Bookmark -> odtDoc.addText(element.info.name + "\n")
                         is DocumentElement.Field -> odtDoc.addText(element.info.instruction + "\n")
+                        is DocumentElement.Metadata -> odtDoc.addText(
+                            "${element.info.title ?: element.info.kind}: ${element.info.summary}\n"
+                        )
                         is DocumentElement.Drawing -> odtDoc.addText(element.info.kind + "\n")
                         is DocumentElement.EmbeddedObject -> odtDoc.addText(
                             (element.info.description ?: element.info.kind) + "\n"

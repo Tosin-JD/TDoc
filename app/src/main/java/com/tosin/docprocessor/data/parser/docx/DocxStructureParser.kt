@@ -2,6 +2,7 @@ package com.tosin.docprocessor.data.parser.docx
 
 import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.parser.internal.models.BookmarkInfo
+import com.tosin.docprocessor.data.parser.internal.models.BookmarkBoundary
 import com.tosin.docprocessor.data.parser.internal.models.CommentInfo
 import com.tosin.docprocessor.data.parser.internal.models.EdgeInsets
 import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterContent
@@ -16,9 +17,13 @@ import org.apache.poi.xwpf.usermodel.XWPFEndnote
 import org.apache.poi.xwpf.usermodel.XWPFHeaderFooter
 import org.apache.poi.xwpf.usermodel.XWPFFootnote
 import org.apache.poi.xwpf.usermodel.XWPFParagraph
+import org.apache.poi.xwpf.usermodel.XWPFTable
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr
 
-class DocxStructureParser {
+class DocxStructureParser(
+    private val paragraphParser: DocxParagraphParser = DocxParagraphParser(),
+    private val tableParser: DocxTableParser = DocxTableParser(paragraphParser)
+) {
 
     fun parseDocumentLevelElements(document: XWPFDocument): List<DocumentElement> {
         val output = mutableListOf<DocumentElement>()
@@ -36,7 +41,19 @@ class DocxStructureParser {
             DocumentElement.Bookmark(
                 BookmarkInfo(
                     id = it.id.toString(),
-                    name = it.name.orEmpty()
+                    name = it.name.orEmpty(),
+                    boundary = BookmarkBoundary.START,
+                    source = "paragraph"
+                )
+            )
+        }
+        output += paragraph.ctp.bookmarkEndList.map {
+            DocumentElement.Bookmark(
+                BookmarkInfo(
+                    id = it.id.toString(),
+                    name = "",
+                    boundary = BookmarkBoundary.END,
+                    source = "paragraph"
                 )
             )
         }
@@ -142,13 +159,39 @@ class DocxStructureParser {
     private fun XWPFHeaderFooter.toContent(
         kind: HeaderFooterKind,
         variant: String
-    ): HeaderFooterContent = HeaderFooterContent(
-        kind = kind,
-        variant = variant,
-        text = text.orEmpty(),
-        paragraphCount = paragraphs.size,
-        tableCount = tables.size
-    )
+    ): HeaderFooterContent {
+        val xml = runCatching { packagePart.inputStream.use { it.readBytes().decodeToString() } }.getOrDefault("")
+        return HeaderFooterContent(
+            kind = kind,
+            variant = variant,
+            text = text.orEmpty(),
+            paragraphCount = paragraphs.size,
+            tableCount = tables.size,
+            elementSummaries = bodyElements.mapNotNull { bodyElement ->
+                when (bodyElement) {
+                    is XWPFParagraph -> paragraphParser.parse(bodyElement)
+                        .spans
+                        .joinToString("") { it.text }
+                        .takeIf { it.isNotBlank() }
+                    is XWPFTable -> tableParser.parse(bodyElement)
+                        .rows
+                        .joinToString(" | ") { row -> row.joinToString(" / ") }
+                        .takeIf { it.isNotBlank() }
+                    else -> null
+                }
+            },
+            containsWatermark = xml.contains("watermark", ignoreCase = true) ||
+                xml.contains("PowerPlusWaterMarkObject", ignoreCase = true),
+            watermarkDescriptions = buildList {
+                if (xml.contains("PowerPlusWaterMarkObject", ignoreCase = true)) {
+                    add("text-watermark")
+                }
+                if (xml.contains("imagedata", ignoreCase = true)) {
+                    add("image-watermark")
+                }
+            }
+        )
+    }
 
     private fun XWPFFootnote.toNote(kind: NoteKind): DocumentElement.Note =
         DocumentElement.Note(

@@ -133,6 +133,7 @@ class DocumentRepositoryImpl @Inject constructor(
                 is DocumentElement.Comment -> element.info.text
                 is DocumentElement.Bookmark -> element.info.name
                 is DocumentElement.Field -> element.info.instruction
+                is DocumentElement.Metadata -> "${element.info.title ?: element.info.kind}: ${element.info.summary}"
                 is DocumentElement.Drawing -> element.info.kind
                 is DocumentElement.EmbeddedObject -> element.info.description ?: element.info.kind
                 is DocumentElement.Table -> element.rows.joinToString("\n") { row -> row.joinToString("\t") }

@@ -13,6 +13,7 @@ import org.apache.poi.xwpf.usermodel.ParagraphAlignment as PoiParagraphAlignment
 import org.apache.poi.xwpf.usermodel.UnderlinePatterns
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.ByteArrayInputStream
 import java.io.FileInputStream
 import org.apache.poi.xwpf.usermodel.Document as PoiDocument
 
@@ -20,17 +21,28 @@ class DocxParser(
     private val paragraphParser: DocxParagraphParser = DocxParagraphParser(DocxListParser()),
     private val tableParser: DocxTableParser = DocxTableParser(),
     private val imageParser: DocxImageParser,
-    private val structureParser: DocxStructureParser = DocxStructureParser(),
+    private val structureParser: DocxStructureParser = DocxStructureParser(paragraphParser, tableParser),
     private val fieldParser: DocxFieldParser = DocxFieldParser(),
-    private val drawingParser: DocxDrawingParser = DocxDrawingParser()
+    private val drawingParser: DocxDrawingParser = DocxDrawingParser(),
+    private val pageBreakParser: DocxPageBreakParser = DocxPageBreakParser(),
+    private val packageExtractors: List<DocxPackageExtractor> = listOf(
+        DocxPackageMetadataExtractor(),
+        DocxAdvancedMarkupExtractor(),
+        DocxEdgeCaseExtractor()
+    )
 ) : DocumentParser {
 
     override suspend fun parse(inputStream: InputStream): Result<List<DocumentElement>> =
         withContext(Dispatchers.IO) {
             try {
-                val doc = XWPFDocument(inputStream)
+                val bytes = inputStream.readBytes()
+                val doc = XWPFDocument(ByteArrayInputStream(bytes))
+                val docxPackage = DocxPackage.from(bytes)
                 val elements = mutableListOf<DocumentElement>()
                 elements += structureParser.parseDocumentLevelElements(doc)
+                packageExtractors.forEach { extractor ->
+                    elements += extractor.extract(doc, docxPackage)
+                }
 
                 for (bodyElement in doc.bodyElements) {
                     when (bodyElement) {
@@ -43,6 +55,7 @@ class DocxParser(
                             elements.addAll(images)
                             elements += bodyElement.runs.flatMap { run -> drawingParser.parse(run) }
                             appendParagraphElements(elements, bodyElement)
+                            elements += pageBreakParser.parse(bodyElement)
                         }
                         is XWPFTable -> {
                             elements.add(tableParser.parse(bodyElement))
@@ -72,6 +85,14 @@ class DocxParser(
                             is DocumentElement.Comment -> writeStructureSummary(document, element.info.text)
                             is DocumentElement.Bookmark -> writeStructureSummary(document, element.info.name)
                             is DocumentElement.Field -> writeStructureSummary(document, element.info.instruction)
+                            is DocumentElement.Metadata -> writeStructureSummary(
+                                document,
+                                buildString {
+                                    append(element.info.title ?: element.info.kind)
+                                    append(": ")
+                                    append(element.info.summary)
+                                }
+                            )
                             is DocumentElement.Drawing -> writeStructureSummary(document, element.info.kind)
                             is DocumentElement.EmbeddedObject -> writeStructureSummary(
                                 document,

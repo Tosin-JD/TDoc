@@ -13,6 +13,7 @@ class DocxDrawingParser {
 
         ctr.drawingList.forEach { drawing ->
             drawing.inlineList.forEach { inline ->
+                val xml = inline.xmlText()
                 output += DocumentElement.Drawing(
                     DrawingInfo(
                         kind = "drawing",
@@ -22,12 +23,15 @@ class DocxDrawingParser {
                         altText = inline.docPr?.descr,
                         title = inline.docPr?.title,
                         wrapStyle = "inline",
-                        hasChart = inline.xmlText().contains("c:chart"),
-                        hasSmartArt = inline.xmlText().contains("dgm:")
+                        hasChart = xml.contains("c:chart"),
+                        hasSmartArt = xml.contains("dgm:"),
+                        rotation = extractRotation(xml),
+                        effects = extractEffects(xml)
                     )
                 )
             }
             drawing.anchorList.forEach { anchor ->
+                val xml = anchor.xmlText()
                 output += DocumentElement.Drawing(
                     DrawingInfo(
                         kind = "drawing",
@@ -38,9 +42,13 @@ class DocxDrawingParser {
                         title = anchor.docPr?.title,
                         positionX = anchor.positionH?.relativeFrom?.toString(),
                         positionY = anchor.positionV?.relativeFrom?.toString(),
-                        wrapStyle = resolveWrapStyle(anchor.xmlText()),
-                        hasChart = anchor.xmlText().contains("c:chart"),
-                        hasSmartArt = anchor.xmlText().contains("dgm:")
+                        wrapStyle = resolveWrapStyle(xml),
+                        hasChart = xml.contains("c:chart"),
+                        hasSmartArt = xml.contains("dgm:"),
+                        rotation = extractRotation(xml),
+                        effects = extractEffects(xml),
+                        isGrouped = xml.contains("<wps:grpSp") || xml.contains("<v:group"),
+                        hasText = xml.contains("<w:txbx") || xml.contains("<v:textbox")
                     )
                 )
             }
@@ -82,4 +90,20 @@ class DocxDrawingParser {
             "wrapTopAndBottom" in xml -> "top-bottom"
             else -> "floating"
         }
+
+    private fun extractRotation(xml: String): Int? {
+        val rotAttr = xml.substringAfter(" rot=\"", "").substringBefore("\"", "")
+        return rotAttr.toIntOrNull()?.let { it / 60000 } // DrawingML rotation is in 60000ths of a degree
+    }
+
+    private fun extractEffects(xml: String): List<String> {
+        val effects = mutableListOf<String>()
+        if ("<a:outerShdw" in xml) effects += "shadow"
+        if ("<a:reflection" in xml) effects += "reflection"
+        if ("<a:glow" in xml) effects += "glow"
+        if ("<a:softEdge" in xml) effects += "soft-edge"
+        if ("<a:scene3d" in xml) effects += "3d-scene"
+        if ("<a:sp3d" in xml) effects += "3d-shape"
+        return effects
+    }
 }
