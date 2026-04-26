@@ -9,11 +9,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SaveAs
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,7 +78,7 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("TDoc Editor") },
+                title = { Text("TDoc") },
                 actions = {
                     IconButton(onClick = {
                         viewMode = if (viewMode == ViewMode.MOBILE) ViewMode.PRINT else ViewMode.MOBILE
@@ -89,7 +89,7 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                         )
                     }
                     IconButton(onClick = { createDocLauncher.launch("Untitled.docx") }) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = "New")
+                        Icon(imageVector = Icons.Default.NoteAdd, contentDescription = "Create New File")
                     }
                     IconButton(onClick = {
                         filePickerLauncher.launch(
@@ -100,16 +100,16 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                             )
                         )
                     }) {
-                        Icon(imageVector = Icons.Default.Search, contentDescription = "Open File")
+                        Icon(imageVector = Icons.Default.FileOpen, contentDescription = "Open File")
                     }
                     IconButton(onClick = { saveAsLauncher.launch("CopyOfDoc.docx") }) {
-                        Icon(imageVector = Icons.Default.Share, contentDescription = "Save As")
+                        Icon(imageVector = Icons.Default.SaveAs, contentDescription = "Save As")
                     }
                     IconButton(
                         onClick = { viewModel.saveCurrentFile() },
                         enabled = !viewModel.isSaving
                     ) {
-                        Icon(imageVector = Icons.Default.Done, contentDescription = "Save")
+                        Icon(imageVector = Icons.Default.Save, contentDescription = "Save File")
                     }
                 }
             )

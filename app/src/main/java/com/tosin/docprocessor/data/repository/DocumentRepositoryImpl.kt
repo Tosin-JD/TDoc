@@ -114,7 +114,7 @@ class DocumentRepositoryImpl @Inject constructor(
     }
 
     private fun plainTextDocument(text: String): List<DocumentElement> =
-        listOf(DocumentElement.Paragraph(spans = listOf(TextSpan(text = text, isBold = false, isItalic = false, color = "000000"))))
+        listOf(DocumentElement.Paragraph(spans = listOf(TextSpan(text = text, color = "000000"))))
 
     private fun List<DocumentElement>.toPlainText(): String =
         joinToString("\n") { element ->
@@ -127,6 +127,14 @@ class DocumentRepositoryImpl @Inject constructor(
                     append(element.spans.joinToString("") { it.text })
                 }
                 is DocumentElement.SectionHeader -> element.text
+                is DocumentElement.Section -> element.properties.toString()
+                is DocumentElement.HeaderFooter -> element.content.text
+                is DocumentElement.Note -> element.info.text
+                is DocumentElement.Comment -> element.info.text
+                is DocumentElement.Bookmark -> element.info.name
+                is DocumentElement.Field -> element.info.instruction
+                is DocumentElement.Drawing -> element.info.kind
+                is DocumentElement.EmbeddedObject -> element.info.description ?: element.info.kind
                 is DocumentElement.Table -> element.rows.joinToString("\n") { row -> row.joinToString("\t") }
                 is DocumentElement.Image -> element.caption ?: element.altText.orEmpty()
                 DocumentElement.PageBreak -> ""

@@ -36,7 +36,7 @@ class OdtXmlParser {
                     val text = element.textContent?.trim().orEmpty()
                     if (text.isNotEmpty()) {
                         output += DocumentElement.Paragraph(
-                            spans = listOf(TextSpan(text = text, isBold = false, isItalic = false, color = "000000"))
+                            spans = listOf(TextSpan(text = text, color = "000000"))
                         )
                     }
                 }

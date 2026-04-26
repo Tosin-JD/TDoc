@@ -9,16 +9,20 @@ import org.apache.poi.xwpf.usermodel.BreakType
 import org.apache.poi.xwpf.usermodel.XWPFDocument
 import org.apache.poi.xwpf.usermodel.XWPFParagraph
 import org.apache.poi.xwpf.usermodel.XWPFTable
+import org.apache.poi.xwpf.usermodel.ParagraphAlignment as PoiParagraphAlignment
+import org.apache.poi.xwpf.usermodel.UnderlinePatterns
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.FileInputStream
 import org.apache.poi.xwpf.usermodel.Document as PoiDocument
 
 class DocxParser(
-    // We pass the ListParser into the ParagraphParser
     private val paragraphParser: DocxParagraphParser = DocxParagraphParser(DocxListParser()),
     private val tableParser: DocxTableParser = DocxTableParser(),
-    private val imageParser: DocxImageParser
+    private val imageParser: DocxImageParser,
+    private val structureParser: DocxStructureParser = DocxStructureParser(),
+    private val fieldParser: DocxFieldParser = DocxFieldParser(),
+    private val drawingParser: DocxDrawingParser = DocxDrawingParser()
 ) : DocumentParser {
 
     override suspend fun parse(inputStream: InputStream): Result<List<DocumentElement>> =
@@ -26,19 +30,19 @@ class DocxParser(
             try {
                 val doc = XWPFDocument(inputStream)
                 val elements = mutableListOf<DocumentElement>()
+                elements += structureParser.parseDocumentLevelElements(doc)
 
                 for (bodyElement in doc.bodyElements) {
                     when (bodyElement) {
                         is XWPFParagraph -> {
-                            // Extract images found within this paragraph's runs
+                            elements += structureParser.parseParagraphMetadata(bodyElement)
+                            elements += fieldParser.parse(bodyElement)
                             val images = bodyElement.runs.flatMap { run ->
                                 run.embeddedPictures.mapNotNull { pic -> imageParser.parse(pic) }
                             }
-
                             elements.addAll(images)
-
-                            // The paragraphParser now handles checking for list labels automatically
-                            elements.add(paragraphParser.parse(bodyElement))
+                            elements += bodyElement.runs.flatMap { run -> drawingParser.parse(run) }
+                            appendParagraphElements(elements, bodyElement)
                         }
                         is XWPFTable -> {
                             elements.add(tableParser.parse(bodyElement))
@@ -62,6 +66,17 @@ class DocxParser(
                         when (element) {
                             is DocumentElement.Paragraph -> writeParagraph(document, element)
                             is DocumentElement.SectionHeader -> writeHeader(document, element)
+                            is DocumentElement.Section -> writeStructureSummary(document, element.properties.toString())
+                            is DocumentElement.HeaderFooter -> writeStructureSummary(document, element.content.text)
+                            is DocumentElement.Note -> writeStructureSummary(document, element.info.text)
+                            is DocumentElement.Comment -> writeStructureSummary(document, element.info.text)
+                            is DocumentElement.Bookmark -> writeStructureSummary(document, element.info.name)
+                            is DocumentElement.Field -> writeStructureSummary(document, element.info.instruction)
+                            is DocumentElement.Drawing -> writeStructureSummary(document, element.info.kind)
+                            is DocumentElement.EmbeddedObject -> writeStructureSummary(
+                                document,
+                                element.info.description ?: element.info.kind
+                            )
                             is DocumentElement.Table -> writeTable(document, element)
                             is DocumentElement.Image -> writeImage(document, element)
                             DocumentElement.PageBreak -> document.createParagraph().createRun().addBreak(BreakType.PAGE)
@@ -77,6 +92,7 @@ class DocxParser(
 
     private fun writeParagraph(document: XWPFDocument, paragraph: DocumentElement.Paragraph) {
         val poiParagraph = document.createParagraph()
+        applyParagraphStyle(poiParagraph, paragraph)
         paragraph.listLabel?.takeIf { it.isNotBlank() }?.let { label ->
             poiParagraph.createRun().setText("$label ")
         }
@@ -84,7 +100,14 @@ class DocxParser(
             val run = poiParagraph.createRun()
             run.isBold = span.isBold
             run.isItalic = span.isItalic
+            run.setUnderline(if (span.isUnderline) UnderlinePatterns.SINGLE else UnderlinePatterns.NONE)
+            run.isStrikeThrough = span.isStrikethrough
+            run.fontFamily = span.fontFamily
+            span.fontSize?.let { run.fontSize = it }
             run.color = span.color.removePrefix("#")
+            span.highlightColor?.let { run.setTextHighlightColor(it) }
+            span.characterSpacing?.let { run.characterSpacing = it }
+            span.language?.let { run.lang = it }
             run.setText(span.text)
         }
     }
@@ -93,12 +116,18 @@ class DocxParser(
         val paragraph = document.createParagraph()
         val run = paragraph.createRun()
         run.isBold = true
+        paragraph.style = "Heading${header.level.coerceIn(1, 9)}"
         run.fontSize = when (header.level) {
             1 -> 20
             2 -> 16
             else -> 14
         }
         run.setText(header.text)
+    }
+
+    private fun writeStructureSummary(document: XWPFDocument, text: String) {
+        if (text.isBlank()) return
+        document.createParagraph().createRun().setText(text)
     }
 
     private fun writeTable(document: XWPFDocument, table: DocumentElement.Table) {
@@ -145,5 +174,55 @@ class DocxParser(
         image.caption?.takeIf { it.isNotBlank() }?.let { caption ->
             document.createParagraph().createRun().setText(caption)
         }
+    }
+
+    private fun appendParagraphElements(
+        elements: MutableList<DocumentElement>,
+        poiParagraph: XWPFParagraph
+    ) {
+        val parsedParagraph = paragraphParser.parse(poiParagraph)
+        val text = parsedParagraph.spans.joinToString(separator = "") { it.text }.trim()
+        if (text.isEmpty() && parsedParagraph.listLabel == null) {
+            return
+        }
+
+        parsedParagraph.style.headingLevel?.let { level ->
+            if (text.isNotEmpty()) {
+                elements.add(DocumentElement.SectionHeader(text = text, level = level))
+                return
+            }
+        }
+
+        elements.add(parsedParagraph)
+    }
+
+    private fun applyParagraphStyle(
+        poiParagraph: XWPFParagraph,
+        paragraph: DocumentElement.Paragraph
+    ) {
+        val style = paragraph.style
+        style.styleId?.takeIf { it.isNotBlank() }?.let { poiParagraph.style = it }
+        poiParagraph.alignment = when (style.alignment) {
+            com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment.END -> {
+                PoiParagraphAlignment.RIGHT
+            }
+            com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment.CENTER -> {
+                PoiParagraphAlignment.CENTER
+            }
+            com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment.JUSTIFIED -> {
+                PoiParagraphAlignment.BOTH
+            }
+            com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment.DISTRIBUTED -> {
+                PoiParagraphAlignment.DISTRIBUTE
+            }
+            else -> PoiParagraphAlignment.LEFT
+        }
+        style.indentation.left?.let { poiParagraph.indentationLeft = it }
+        style.indentation.right?.let { poiParagraph.indentationRight = it }
+        style.indentation.firstLine?.let { poiParagraph.indentationFirstLine = it }
+        style.indentation.hanging?.let { poiParagraph.indentationHanging = it }
+        style.spacing.before?.let { poiParagraph.spacingBefore = it }
+        style.spacing.after?.let { poiParagraph.spacingAfter = it }
+        style.spacing.line?.let { poiParagraph.spacingBetween = it / 240.0 }
     }
 }

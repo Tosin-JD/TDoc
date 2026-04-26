@@ -42,6 +42,16 @@ class OdtParser(
                     when (element) {
                         is DocumentElement.Paragraph -> odtDoc.addText(element.spans.joinToString("") { it.text } + "\n")
                         is DocumentElement.SectionHeader -> odtDoc.addText(element.text + "\n")
+                        is DocumentElement.Section -> odtDoc.addText(element.properties.toString() + "\n")
+                        is DocumentElement.HeaderFooter -> odtDoc.addText(element.content.text + "\n")
+                        is DocumentElement.Note -> odtDoc.addText(element.info.text + "\n")
+                        is DocumentElement.Comment -> odtDoc.addText(element.info.text + "\n")
+                        is DocumentElement.Bookmark -> odtDoc.addText(element.info.name + "\n")
+                        is DocumentElement.Field -> odtDoc.addText(element.info.instruction + "\n")
+                        is DocumentElement.Drawing -> odtDoc.addText(element.info.kind + "\n")
+                        is DocumentElement.EmbeddedObject -> odtDoc.addText(
+                            (element.info.description ?: element.info.kind) + "\n"
+                        )
                         is DocumentElement.Table -> {
                             val tableText = element.rows.joinToString("\n") { row -> row.joinToString("\t") }
                             odtDoc.addText(tableText + "\n")

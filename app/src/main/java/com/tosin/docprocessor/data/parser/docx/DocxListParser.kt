@@ -1,5 +1,6 @@
 package com.tosin.docprocessor.data.parser.docx
 
+import com.tosin.docprocessor.data.parser.internal.models.ListInfo
 import org.apache.poi.xwpf.usermodel.XWPFParagraph
 import java.math.BigInteger
 
@@ -32,9 +33,33 @@ class DocxListParser {
 
         return when (format) {
             "bullet" -> "•"
-            // numLevelText is a helper that returns the actual calculated number/bullet
             "decimal" -> "${paragraph.numLevelText}."
             else -> "•"
         }
+    }
+
+    fun parseListInfo(paragraph: XWPFParagraph): ListInfo? {
+        val numbering = paragraph.document.numbering ?: return null
+        val numID: BigInteger = paragraph.numID ?: return null
+        if (numID == BigInteger.valueOf(-1)) return null
+
+        val num = numbering.getNum(numID) ?: return null
+        val abstractNumID = num.ctNum.abstractNumId?.`val` ?: return null
+        val abstractNum = numbering.getAbstractNum(abstractNumID) ?: return null
+        val level = paragraph.numIlvl ?: BigInteger.ZERO
+        val levelConf = abstractNum.abstractNum.getLvlArray(level.toInt()) ?: return null
+        val format = levelConf.numFmt?.`val`?.toString()
+        val bulletFont = levelConf.rPr
+            ?.takeIf { it.sizeOfRFontsArray() > 0 }
+            ?.getRFontsArray(0)
+            ?.ascii
+
+        return ListInfo(
+            level = level.toInt(),
+            format = format,
+            levelText = levelConf.lvlText?.`val`,
+            startOverride = paragraph.numStartOverride?.toInt(),
+            bulletFont = bulletFont
+        )
     }
 }

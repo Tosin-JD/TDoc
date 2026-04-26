@@ -91,9 +91,7 @@ class EditorViewModel @Inject constructor(
                     spans = listOf(
                         TextSpan(
                             text = newContent.text,
-                            isBold = false,
-                            isItalic = false,
-                            color = "000000"
+                            color = element.spans.firstOrNull()?.color ?: "000000"
                         )
                     )
                 )

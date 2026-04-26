@@ -16,12 +16,18 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import com.tosin.docprocessor.ui.components.TableWidget
 import com.tosin.docprocessor.ui.editor.EditorViewModel
@@ -31,7 +37,7 @@ import java.io.File
 fun DocumentElementRenderer(element: DocumentElement, index: Int, viewModel: EditorViewModel) {
     when (element) {
         is DocumentElement.Paragraph -> {
-            val paragraphText = remember(element.spans, element.listLabel) {
+            val paragraphText = remember(element.spans, element.listLabel, element.style) {
                 element.toAnnotatedString()
             }
             TextField(
@@ -97,13 +103,44 @@ fun DocumentElementRenderer(element: DocumentElement, index: Int, viewModel: Edi
             )
         }
 
+        is DocumentElement.Section -> MetadataText(element.properties.toString())
+
+        is DocumentElement.HeaderFooter -> MetadataText(
+            "${element.content.kind.name.lowercase()} (${element.content.variant}): ${element.content.text}"
+        )
+
+        is DocumentElement.Note -> MetadataText("${element.info.kind.name.lowercase()}: ${element.info.text}")
+
+        is DocumentElement.Comment -> MetadataText("comment by ${element.info.author ?: "unknown"}: ${element.info.text}")
+
+        is DocumentElement.Bookmark -> MetadataText("bookmark: ${element.info.name}")
+
+        is DocumentElement.Field -> MetadataText("field ${element.info.type}: ${element.info.instruction}")
+
+        is DocumentElement.Drawing -> MetadataText("drawing: ${element.info.kind}")
+
+        is DocumentElement.EmbeddedObject -> MetadataText(
+            "embedded object: ${element.info.programId ?: element.info.kind}"
+        )
+
         DocumentElement.PageBreak -> {
             Text(text = "", modifier = Modifier.padding(vertical = 12.dp))
         }
     }
 }
 
+@Composable
+private fun MetadataText(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = Color.Gray,
+        modifier = Modifier.padding(vertical = 4.dp)
+    )
+}
+
 private fun DocumentElement.Paragraph.toAnnotatedString(): AnnotatedString = buildAnnotatedString {
+    pushStyle(style.toComposeParagraphStyle())
     listLabel?.let {
         append(it)
         append(" ")
@@ -113,6 +150,7 @@ private fun DocumentElement.Paragraph.toAnnotatedString(): AnnotatedString = bui
         append(span.text)
         pop()
     }
+    pop()
 }
 
 private fun TextSpan.toSpanStyle(): SpanStyle {
@@ -129,6 +167,26 @@ private fun TextSpan.toSpanStyle(): SpanStyle {
     return SpanStyle(
         fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
         fontStyle = if (isItalic) FontStyle.Italic else FontStyle.Normal,
-        color = parsedColor
+        textDecoration = when {
+            isUnderline && isStrikethrough -> TextDecoration.combine(
+                listOf(TextDecoration.Underline, TextDecoration.LineThrough)
+            )
+            isUnderline -> TextDecoration.Underline
+            isStrikethrough -> TextDecoration.LineThrough
+            else -> null
+        },
+        color = parsedColor,
+        fontSize = fontSize?.sp ?: TextUnit.Unspecified
     )
 }
+
+private fun com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle.toComposeParagraphStyle():
+    ParagraphStyle = ParagraphStyle(
+    textAlign = when (alignment) {
+        ParagraphAlignment.END -> TextAlign.End
+        ParagraphAlignment.CENTER -> TextAlign.Center
+        ParagraphAlignment.JUSTIFIED -> TextAlign.Justify
+        ParagraphAlignment.DISTRIBUTED -> TextAlign.Justify
+        else -> TextAlign.Start
+    }
+)
