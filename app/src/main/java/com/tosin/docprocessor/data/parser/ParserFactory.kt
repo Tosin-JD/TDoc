@@ -16,7 +16,7 @@ class ParserFactory @Inject constructor(
     fun createParser(mimeType: String): DocumentParser? {
         return when (mimeType) {
             MimeTypes.DOCX -> DocxParser(imageParser = DocxImageParser(context.cacheDir))
-            MimeTypes.ODT -> OdtParser(xmlParser = OdtXmlParser())
+            MimeTypes.ODT -> OdtParser(context)
             else -> null
         }
     }

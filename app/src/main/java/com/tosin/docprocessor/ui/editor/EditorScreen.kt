@@ -11,10 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FileOpen
-import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SaveAs
 import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -89,7 +89,7 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                         )
                     }
                     IconButton(onClick = { createDocLauncher.launch("Untitled.docx") }) {
-                        Icon(imageVector = Icons.Default.NoteAdd, contentDescription = "Create New File")
+                        Icon(imageVector = Icons.AutoMirrored.Filled.NoteAdd, contentDescription = "Create New File")
                     }
                     IconButton(onClick = {
                         filePickerLauncher.launch(

@@ -1,307 +1,300 @@
 ---
-name: kotlin-docx-parser
+name: odt-parser
 description: >
-  Complete guide for building a production-grade .docx parser in Kotlin using Apache POI and
-  Jetpack Compose. Use this skill whenever the user wants to parse, extract, render, or process
-  Word documents (.docx files) in an Android or Kotlin project — even if they just say "read a Word
-  file", "extract text from docx", "display a document in Compose", "build a document editor",
-  or "handle .docx in my app". Also triggers for questions about integrating an AI/LLM agent into
-  document parsing, mapping extracted content to a Room database, or converting document layout
-  from print to mobile view. When in doubt about whether this skill applies, use it.
+  Build, extend, or debug an ODT (OpenDocument Text) file parser in Kotlin.
+  Use this skill whenever the user wants to parse .odt files, extract structured
+  content from ODT documents, implement OdtParser or OdtXmlParser classes, add
+  new DocumentElement types for ODT output, integrate ODT parsing into a
+  multi-format document pipeline, or handle ODT-specific ZIP/XML structures.
+  Trigger this skill even when the user only mentions "OpenDocument", "LibreOffice
+  files", "content.xml parsing", or wants to extend an existing parser to support ODT.
 ---
 
-# Kotlin .docx Parser Skill
+# ODT Parser — Kotlin Implementation Skill
 
-This skill guides you through building a complete, AI-augmented .docx parser for Android using
-Apache POI, Kotlin Coroutines, Jetpack Compose, and the Anthropic API. It covers the full pipeline
-from raw file ingestion to rendering structured document content in a mobile UI.
-
-Read the relevant reference file before writing code:
-- **`references/poi-extraction.md`** — Apache POI API patterns, section tree building, table conversion
-- **`references/agent-skills.md`** — LLM agent skill implementations (CoT extraction, windowing, schema mapping)
-- **`references/compose-rendering.md`** — Jetpack Compose document viewer components and layout inference
+This skill guides you through building a production-quality ODT parser in Kotlin
+that integrates with a `DocumentParser` interface and outputs a normalized
+`List<DocumentElement>`.
 
 ---
 
-## Architecture overview
+## Architecture Overview
 
-The parser is split into four layers. Build them in this order — each layer depends on the previous.
+An ODT file is a ZIP archive containing XML files. The parsing pipeline is:
 
 ```
-.docx file
-    ↓
-[ Layer 1: Ingestion ]      Apache POI — reads XML, extracts raw structure
-    ↓
-[ Layer 2: Agent skills ]   LLM pipeline — CoT extraction, windowing, schema mapping
-    ↓
-[ Layer 3: Data layer ]     Room DB — persists FileModel, sections, tables, images
-    ↓
-[ Layer 4: UI ]             Jetpack Compose — adaptive Mobile / Print layout renderer
+.odt file (ZIP)
+    └── content.xml        ← primary content
+    └── styles.xml         ← named styles
+    └── meta.xml           ← document metadata
+    └── Pictures/          ← embedded images
+
+Pipeline:
+  OdtParser                (entry point, implements DocumentParser)
+      └── OdtZipExtractor  (unzips, locates content.xml)
+          └── OdtXmlParser (DOM traversal, element mapping)
+              └── List<DocumentElement>
 ```
+
+**Key constraint**: ODT uses the ODF namespace (`urn:oasis:names:tc:opendocument:xmlns:*`).
+Always resolve namespace-prefixed element names — never match on local names alone.
 
 ---
 
-## Quick-start: Gradle dependencies
+## Namespace Reference
 
-Add these to your `build.gradle.kts` (app module). Use exact versions — POI has breaking API
-changes across majors.
-
-```kotlin
-dependencies {
-    // Apache POI — .docx support
-    implementation("org.apache.poi:poi:5.3.0")
-    implementation("org.apache.poi:poi-ooxml:5.3.0")
-
-    // Required POI runtime deps (not pulled in transitively on Android)
-    implementation("org.apache.xmlbeans:xmlbeans:5.2.1")
-    implementation("com.github.virtuald:curvesapi:1.08")
-
-    // Kotlin Serialization — JSON ↔ FileModel
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-
-    // Room — persistence
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
-
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
-    // Compose (Bill of Materials keeps versions in sync)
-    implementation(platform("androidx.compose:compose-bom:2024.09.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.foundation:foundation")
-}
-```
-
-**Android-specific POI note:** POI uses `java.awt` classes that are absent on Android. Add this
-to your `build.gradle.kts` (app module) to prevent crashes:
-
-```kotlin
-android {
-    packaging {
-        resources.excludes += setOf(
-            "META-INF/DEPENDENCIES",
-            "META-INF/LICENSE*",
-            "META-INF/NOTICE*"
-        )
-    }
-}
-```
+| Prefix | URI                                                          | Used for              |
+|--------|--------------------------------------------------------------|-----------------------|
+| `text` | `urn:oasis:names:tc:opendocument:xmlns:text:1.0`            | Paragraphs, headings  |
+| `draw` | `urn:oasis:names:tc:opendocument:xmlns:drawing:1.0`         | Images, shapes        |
+| `table`| `urn:oasis:names:tc:opendocument:xmlns:table:1.0`           | Tables                |
+| `fo`   | `urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0`| Formatting properties |
+| `style`| `urn:oasis:names:tc:opendocument:xmlns:style:1.0`           | Style definitions     |
+| `xlink`| `http://www.w3.org/1999/xlink`                              | Hyperlink href        |
+| `meta` | `urn:oasis:names:tc:opendocument:xmlns:meta:1.0`            | Document metadata     |
 
 ---
 
-## Core data model
+## Step-by-Step Implementation Guide
 
-Define this before writing any parser or UI code. Everything else maps to or from it.
+### Step 1 — Implement `OdtParser` (Entry Point)
 
-```kotlin
-@Serializable
-@Entity(tableName = "files")
-data class FileModel(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val fileName: String,
-    val title: String?,
-    val date: String?,           // ISO-8601 if found, else null
-    val parties: List<String>,   // Names/signatories extracted by agent
-    val summary: String?,
-    val rawMarkdown: String,     // Full doc as Markdown (tables + headings preserved)
-    val layoutHint: String,      // "LazyColumn" | "Row" — from layout inference skill
-    val createdAt: Long = System.currentTimeMillis()
-)
+`OdtParser` implements `DocumentParser`. It must:
 
-@Entity(tableName = "sections", foreignKeys = [ForeignKey(...)])
-data class DocSection(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val fileId: String,
-    val level: Int,              // 1–6 matching Heading level; 0 = body
-    val title: String,
-    val content: String,
-    val orderIndex: Int
-)
+1. Accept an `InputStream`
+2. Read all bytes (copy to `ByteArrayInputStream` so the stream is re-readable)
+3. Delegate ZIP extraction to `OdtZipExtractor`
+4. Delegate XML parsing to `OdtXmlParser`
+5. Return `Result<List<DocumentElement>>`
 
-@Entity(tableName = "images")
-data class DocImage(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val fileId: String,
-    val sectionId: String?,
-    val data: ByteArray,
-    val mimeType: String,
-    val aiDescription: String?   // Filled by vision agent skill
-)
-```
+**Checklist:**
+- [ ] Class annotated with `@Inject constructor` for Hilt DI
+- [ ] Both `parse()` and `save()` are `suspend fun`
+- [ ] Use `withContext(Dispatchers.IO)` internally
+- [ ] Wrap entire body in `runCatching { }` and return as `Result`
+- [ ] Close streams in `finally` blocks
+
+**`save()` guidance**: ODT write-back is complex. For an initial implementation,
+return `Result.failure(UnsupportedOperationException("ODT save not yet implemented"))`.
 
 ---
 
-## Pipeline: step-by-step
+### Step 2 — Implement `OdtZipExtractor`
 
-### Step 1 — Ingest with Apache POI
+Responsibility: open the ZIP, find named entries, return their byte content.
 
-See **`references/poi-extraction.md`** for the full API reference and edge cases.
-
-Key entry point:
-
-```kotlin
-class DocxParser(private val context: Context) {
-    fun open(uri: Uri): XWPFDocument {
-        val stream = context.contentResolver.openInputStream(uri)
-            ?: error("Cannot open $uri")
-        return XWPFDocument(stream)
-    }
-}
+**Required methods:**
+```
+extractEntry(zipBytes: ByteArray, entryName: String): ByteArray?
+listEntries(zipBytes: ByteArray): List<String>
 ```
 
-### Step 2 — Build section tree
+**Rules:**
+- Use `java.util.zip.ZipInputStream` (available on Android without extra deps)
+- Entry names are case-sensitive; `content.xml` ≠ `Content.xml`
+- If `content.xml` is missing → throw `IllegalArgumentException("Not a valid ODT file: missing content.xml")`
+- For images, look inside `Pictures/` entries; preserve original entry name as the image URI
 
-Walk `doc.paragraphs`, check `para.style` for Heading1–Heading6, and construct a
-`List<DocSection>` hierarchy. This index powers the **windowing** agent skill — the LLM
-requests individual sections rather than the full document.
+---
 
-```kotlin
-fun buildSectionIndex(doc: XWPFDocument): Map<String, String> {
-    val index = mutableMapOf<String, StringBuilder>()
-    var currentKey = "preamble"
-    index[currentKey] = StringBuilder()
+### Step 3 — Implement `OdtXmlParser`
 
-    doc.paragraphs.forEach { para ->
-        val level = headingLevel(para.style) // 0 = body, 1–6 = heading
-        if (level > 0) {
-            currentKey = para.text.trim()
-            index[currentKey] = StringBuilder()
-        } else {
-            index[currentKey]?.append(para.text)?.append("\n")
-        }
-    }
-    return index.mapValues { it.value.toString() }
-}
+Responsibility: parse `content.xml` bytes into `List<DocumentElement>`.
 
-private fun headingLevel(style: String?): Int = when (style) {
-    "Heading1" -> 1; "Heading2" -> 2; "Heading3" -> 3
-    "Heading4" -> 4; "Heading5" -> 5; "Heading6" -> 6
-    else -> 0
-}
+**Parsing approach — DOM (recommended for ODT):**
+- Use `javax.xml.parsers.DocumentBuilderFactory` (built-in, no extra dependencies)
+- Set `isNamespaceAware = true` on the factory — **this is mandatory**
+- Get the `<office:body>` → `<office:text>` subtree as the root of traversal
+- Recursively walk child nodes
+
+**Element mapping table:**
+
+| ODT XML element        | `DocumentElement` subtype | Notes                                      |
+|------------------------|---------------------------|--------------------------------------------|
+| `<text:h>`             | `SectionHeader`           | `text:outline-level` attr → `level`        |
+| `<text:p>`             | `Paragraph`               | May contain spans, links, images           |
+| `<text:span>`          | contributes to `TextSpan` | Nested inside paragraph                    |
+| `<text:list>`          | `Paragraph` (list item)   | Set `listLabel` from `<text:list-item>`    |
+| `<table:table>`        | `Table`                   | Rows = `<table:table-row>`, cells = `<table:table-cell>` |
+| `<draw:image>`         | `Image`                   | `xlink:href` → `sourceUri`                 |
+| `<text:note>`          | `Note`                    | `text:note-class` = "footnote"/"endnote"   |
+| `<text:bookmark>`      | `Bookmark`                | `text:name` attr → `BookmarkInfo.name`     |
+| `<text:a>`             | `HyperlinkInfo` on span   | `xlink:href` attr                          |
+| `<text:page-break>`    | `PageBreak`               | Or detected via paragraph style            |
+
+**Traversal rules:**
+- Use a depth-first recursive walk
+- Skip `#text` nodes that are pure whitespace when building structural elements
+- When a `<text:p>` contains no meaningful text AND no child elements → skip it (empty paragraph)
+- Mixed content (text + `<text:span>` + `<text:a>`) must be collected in order into `List<TextSpan>`
+
+---
+
+### Step 4 — Text Span Extraction
+
+Inside a `<text:p>` or `<text:h>`, text is assembled from:
+
+1. **Direct text nodes** → `TextSpan` with no formatting override
+2. **`<text:span>`** → `TextSpan` with style from `text:style-name` attr
+3. **`<text:a>`** → `TextSpan` with `HyperlinkInfo(href = xlink:href)`
+4. **`<text:s>`** → space(s); `text:c` attr = count (default 1)
+5. **`<text:tab>`** → tab character `\t`
+6. **`<text:line-break>`** → newline `\n`
+
+**Style resolution for `TextSpan`:**
+- Look up `text:style-name` in the automatic styles from `<office:automatic-styles>`
+- Then fall back to named styles in `styles.xml` (load this file too)
+- Extract `fo:font-weight="bold"`, `fo:font-style="italic"`, `style:text-underline-style`, `fo:color`
+
+---
+
+### Step 5 — Table Extraction
+
+```
+<table:table>
+  <table:table-column />    ← skip (column metadata only)
+  <table:table-row>
+    <table:table-cell>
+      <text:p>cell text</text:p>
+    </table:table-cell>
+  </table:table-row>
+</table:table>
 ```
 
-### Step 3 — Convert tables to Markdown
+**Rules:**
+- Collect all `<table:table-row>` children
+- For each row, collect all `<table:table-cell>` children
+- Cell text = recursively extract all text content from the cell's child paragraphs (concatenate with `\n` if multiple paragraphs)
+- `hasHeader`: check if first row's cells have `table:style-name` containing "Header" — otherwise `false`
+- Respect `table:number-columns-spanned` attr for merged cells: repeat the cell value that many times in the row list
 
-Sends Markdown to the LLM instead of raw text, preserving row/column relationships.
-Never send a serialized XWPFTable object — the LLM cannot parse it.
+---
 
-```kotlin
-fun tableToMarkdown(table: XWPFTable): String = buildString {
-    table.rows.forEachIndexed { ri, row ->
-        val cells = row.tableCells.joinToString(" | ") { cell ->
-            cell.text.trim().replace("\n", " ")
-        }
-        appendLine("| $cells |")
-        if (ri == 0) {
-            val sep = row.tableCells.joinToString(" | ") { "---" }
-            appendLine("| $sep |")
-        }
-    }
-}
+### Step 6 — Image Extraction
+
+```
+<draw:frame draw:name="Image1" ...>
+  <draw:image xlink:href="Pictures/image1.png" xlink:type="simple"/>
+  <svg:desc>alt text here</svg:desc>
+</draw:frame>
 ```
 
-### Step 4 — Run agent skills
+- `sourceUri` = `xlink:href` value (e.g. `"Pictures/image1.png"`)
+- `altText` = text content of `<svg:desc>` or `<draw:object-ole>` title, if present
+- Extract the image bytes from the ZIP using `OdtZipExtractor.extractEntry(zipBytes, sourceUri)`
+- Cache to a temp file; replace `sourceUri` with the `file://` URI of the cached file
 
-See **`references/agent-skills.md`** for full prompts and implementation of:
-- **Windowing** — `get_section` MCP tool that returns one section at a time
-- **Chain-of-thought extraction** — 3-step verified loop per field
-- **Schema mapping** — JSON output deserialized to `FileModel`
-- **Vision parsing** — base64 image sent to Claude for embedded charts/diagrams
-- **Prompt caching** — section tree cached as ephemeral system block
+---
 
-### Step 5 — Infer layout
+### Step 7 — Metadata Extraction
 
-Reads section metadata from `doc.document.body` to decide between `LazyColumn` (single-column
-mobile) and `Row` (multi-column print). See **`references/compose-rendering.md`**.
+Parse `meta.xml` for document-level `Metadata`:
 
-### Step 6 — Persist to Room
+| XML element                    | MetadataInfo field    |
+|--------------------------------|-----------------------|
+| `<meta:initial-creator>`       | `author`              |
+| `<dc:title>`                   | `title`               |
+| `<dc:description>`             | `description`         |
+| `<meta:creation-date>`         | `createdAt`           |
+| `<dc:date>`                    | `modifiedAt`          |
+| `<meta:word-count>`            | `wordCount`           |
+
+Add the `Metadata` element as the **first** item in the result list.
+
+---
+
+### Step 8 — Register in `ParserFactory`
 
 ```kotlin
-@Dao
-interface FileDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertFile(file: FileModel)
+MimeTypes.ODT -> OdtParser(context)
+```
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertSections(sections: List<DocSection>)
-
-    @Query("SELECT * FROM files ORDER BY createdAt DESC")
-    fun observeAll(): Flow<List<FileModel>>
-}
+Add to `MimeTypes`:
+```kotlin
+const val ODT = "application/vnd.oasis.opendocument.text"
 ```
 
 ---
 
-## ViewModel — orchestrating the pipeline
+## Error Handling Patterns
 
-```kotlin
-@HiltViewModel
-class DocParserViewModel @Inject constructor(
-    private val parser: DocxParser,
-    private val agent: DocAgentClient,
-    private val dao: FileDao
-) : ViewModel() {
-
-    sealed interface ParseState {
-        data object Idle : ParseState
-        data class Loading(val step: String) : ParseState
-        data class Done(val model: FileModel) : ParseState
-        data class Error(val message: String) : ParseState
-    }
-
-    val state = MutableStateFlow<ParseState>(ParseState.Idle)
-
-    fun process(uri: Uri) {
-        viewModelScope.launch {
-            runCatching {
-                state.value = ParseState.Loading("Reading file…")
-                val doc = parser.open(uri)
-
-                state.value = ParseState.Loading("Building structure…")
-                val sectionIndex = buildSectionIndex(doc)
-                val tables = doc.tables.map(::tableToMarkdown)
-
-                state.value = ParseState.Loading("Running AI extraction…")
-                val fileModel = agent.extractAll(
-                    sectionIndex = sectionIndex,
-                    tables = tables,
-                    images = doc.allPictures
-                )
-
-                state.value = ParseState.Loading("Saving…")
-                dao.insertFile(fileModel)
-                dao.insertSections(fileModel.toDocSections())
-
-                state.value = ParseState.Done(fileModel)
-            }.onFailure { e ->
-                state.value = ParseState.Error(e.message ?: "Unknown error")
-            }
-        }
-    }
-}
-```
+| Scenario                          | Correct Response                                                   |
+|-----------------------------------|--------------------------------------------------------------------|
+| Not a ZIP / corrupted archive     | `Result.failure(IllegalArgumentException("Invalid ODT file"))`    |
+| Missing `content.xml`             | `Result.failure(IllegalArgumentException("Missing content.xml"))` |
+| Unknown XML element               | Skip silently, continue traversal                                  |
+| Image entry not found in ZIP      | Set `sourceUri = xlink:href` raw value; log a warning             |
+| Null or empty `text:outline-level`| Default `SectionHeader.level = 1`                                  |
+| Malformed namespace               | Fall back to local name matching with a logged warning             |
 
 ---
 
-## Common pitfalls
+## Testing Strategy
 
-| Problem | Cause | Fix |
-|---|---|---|
-| `NoClassDefFoundError: java.awt.Color` | POI uses AWT internals | Add `poi-ooxml-lite` or exclude AWT via packagingOptions |
-| Paragraphs have no style | Doc used direct formatting, not styles | Fall back to font size: >16pt → treat as heading |
-| Merged table cells cause column shift | POI iterates physical cells only | Track `gridSpan` attribute and pad missing cells |
-| LLM hallucinates dates | Full doc sent at once | Use windowing — send only the section near a date-like keyword |
-| Compose recompose on every scroll | `FileModel` not stable | Annotate with `@Stable` or use `ImmutableList` from `kotlinx.collections.immutable` |
+### Unit Tests
+
+| Test class              | What to test                                                              |
+|-------------------------|---------------------------------------------------------------------------|
+| `OdtZipExtractorTest`   | Valid ZIP, missing entry, corrupted ZIP, entry name case sensitivity      |
+| `OdtXmlParserTest`      | Headings at levels 1–6, empty paragraphs, nested spans, lists, tables, images |
+| `OdtParserTest`         | Full parse of a real `.odt` fixture, Result.isSuccess, element count     |
+
+### Test Fixture Files to Prepare
+
+- `simple.odt` — only headings and paragraphs
+- `formatted.odt` — bold, italic, underline, color spans
+- `with_table.odt` — single table, merged cells
+- `with_image.odt` — one embedded PNG
+- `with_list.odt` — ordered and unordered lists
+- `empty.odt` — no body content (edge case)
+- `corrupted.odt` — invalid ZIP (should return `Result.failure`)
+
+### Assertions Checklist
+
+- [ ] `result.isSuccess` is `true` for valid files
+- [ ] First element is `DocumentElement.Metadata`
+- [ ] `SectionHeader.level` matches `text:outline-level`
+- [ ] `Table.rows` has correct row and column count
+- [ ] `Image.sourceUri` is a `file://` URI pointing to a cached file
+- [ ] `Paragraph.spans` preserves order and formatting flags
+- [ ] Empty ODT returns `Result.success(listOf(metadata))` — not failure
 
 ---
 
-## Reference files
+## Common Pitfalls
 
-Read these when implementing each layer:
+1. **Forgetting `isNamespaceAware = true`** — element lookups by local name will appear to work but will miss namespaced attrs like `xlink:href`.
+2. **Matching element names without prefix** — use `localName` + `namespaceURI` checks, not `nodeName` (which includes prefix and is implementation-dependent).
+3. **Not handling `<text:s text:c="N">`** — produces garbled whitespace in output.
+4. **Assuming content.xml root is `<office:document>`** — it may be `<office:document-content>` in some editors; match both.
+5. **Reading the ZIP stream twice** — `ZipInputStream` is forward-only; buffer all entries on first pass into a `Map<String, ByteArray>`.
+6. **Blocking on main thread** — always wrap in `withContext(Dispatchers.IO)` inside suspend functions.
 
-- **`references/poi-extraction.md`** — Full Apache POI API, footnotes, images, headers/footers, tracked changes
-- **`references/agent-skills.md`** — Anthropic API calls, prompt caching, CoT extraction prompts, MCP tool definitions, vision parsing
-- **`references/compose-rendering.md`** — DocViewer composable, MarkdownTable, layout inference, Print vs Mobile toggle
+---
+
+## Dependencies
+
+No external libraries are required beyond what is already available on Android/JVM:
+
+| Need                  | Use                                       |
+|-----------------------|-------------------------------------------|
+| ZIP reading           | `java.util.zip.ZipInputStream`            |
+| XML parsing           | `javax.xml.parsers.DocumentBuilderFactory`|
+| Coroutines            | `kotlinx.coroutines` (already in project) |
+| DI                    | Hilt (already in project)                 |
+
+> If richer style parsing is needed later, consider **Apache ODF Toolkit** (`org.odftoolkit:odfdom-java`), but avoid it for the initial implementation to keep the dependency footprint small.
+
+---
+
+## Integration Checklist
+
+- [ ] `OdtParser` implements `DocumentParser`
+- [ ] `OdtParser` registered in `ParserFactory` under `MimeTypes.ODT`
+- [ ] `OdtZipExtractor` correctly buffers all ZIP entries on first pass
+- [ ] `OdtXmlParser` parses with namespace awareness
+- [ ] All `DocumentElement` subtypes listed in the mapping table are handled
+- [ ] `save()` returns `UnsupportedOperationException` until implemented
+- [ ] All parsers wrapped in `Result` — no uncaught exceptions escape
+- [ ] Unit tests cover all fixture files listed above
+- [ ] No parsing work runs on the main thread

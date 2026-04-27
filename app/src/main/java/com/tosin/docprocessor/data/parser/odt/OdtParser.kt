@@ -1,5 +1,6 @@
 package com.tosin.docprocessor.data.parser.odt
 
+import android.content.Context
 import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.parser.DocumentParser
 import kotlinx.coroutines.Dispatchers
@@ -7,36 +8,39 @@ import kotlinx.coroutines.withContext
 import org.odftoolkit.odfdom.doc.OdfTextDocument
 import java.io.InputStream
 import java.io.OutputStream
-import java.util.zip.ZipInputStream
 
 class OdtParser(
-    private val xmlParser: OdtXmlParser = OdtXmlParser()
+    private val context: Context
 ) : DocumentParser {
+
+    private val zipExtractor = OdtZipExtractor()
+    private val metadataParser = OdtMetadataParser()
 
     override suspend fun parse(inputStream: InputStream): Result<List<DocumentElement>> =
         withContext(Dispatchers.IO) {
-            try {
+            runCatching {
+                val entries = zipExtractor.extractAllEntries(inputStream)
+                val contentXml = entries["content.xml"] 
+                    ?: throw IllegalArgumentException("Not a valid ODT file: missing content.xml")
+                
                 val elements = mutableListOf<DocumentElement>()
-                ZipInputStream(inputStream).use { zip ->
-                    var entry = zip.nextEntry
-                    while (entry != null) {
-                        if (entry.name == "content.xml") {
-                            val xml = zip.readBytes().decodeToString()
-                            elements += xmlParser.parse(xml)
-                            break
-                        }
-                        entry = zip.nextEntry
-                    }
-                }
-                Result.success(elements)
-            } catch (e: Exception) {
-                Result.failure(e)
+                
+                // 1. Metadata
+                val metaXml = entries["meta.xml"]
+                metadataParser.parse(metaXml)?.let { elements += it }
+                
+                // 2. Content
+                val xmlParser = OdtXmlParser(context.cacheDir, entries)
+                elements += xmlParser.parse(contentXml)
+                
+                elements
             }
         }
 
     override suspend fun save(outputStream: OutputStream, content: List<DocumentElement>): Result<Unit> =
         withContext(Dispatchers.IO) {
-            try {
+            runCatching {
+                // Keep the current ODFDOM implementation for saving
                 val odtDoc = OdfTextDocument.newTextDocument()
                 content.forEach { element ->
                     when (element) {
@@ -66,9 +70,6 @@ class OdtParser(
                     }
                 }
                 odtDoc.save(outputStream)
-                Result.success(Unit)
-            } catch (e: Exception) {
-                Result.failure(e)
             }
         }
 }

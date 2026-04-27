@@ -33,7 +33,7 @@ class DocxParagraphParser(
                 isSubscript = verticalAlignment == "subscript",
                 isHidden = run.isVanish,
                 fontFamily = run.fontFamily,
-                fontSize = run.fontSize.takeIf { it > 0 },
+                fontSize = run.fontSizeAsDouble?.toInt()?.takeIf { it > 0 } ?: 11,
                 color = run.color ?: "000000",
                 highlightColor = run.textHighlightColor?.toString(),
                 characterSpacing = run.characterSpacing.takeIf { it != 0 },
