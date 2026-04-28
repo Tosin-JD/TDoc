@@ -38,7 +38,7 @@ import com.tosin.docprocessor.data.common.model.MimeTypes
 import com.tosin.docprocessor.data.common.model.ViewMode
 import com.tosin.docprocessor.ui.components.FormattingToolbar
 import com.tosin.docprocessor.ui.editor.layouts.MobileLayout
-import com.tosin.docprocessor.ui.editor.layouts.PrintLayout
+import com.tosin.docprocessor.ui.editor.layouts.print.PrintLayout
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
