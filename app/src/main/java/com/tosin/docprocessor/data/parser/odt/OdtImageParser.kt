@@ -30,6 +30,7 @@ class OdtImageParser(
         try {
             FileOutputStream(cacheFile).use { it.write(bytes) }
         } catch (e: Exception) {
+            com.tosin.docprocessor.data.parser.util.TDocLogger.error("Failed to save ODT image to cache", e)
             return null
         }
 

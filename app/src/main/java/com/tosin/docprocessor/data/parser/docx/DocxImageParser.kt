@@ -32,7 +32,7 @@ class DocxImageParser(private val cacheDir: File) {
                 caption = null // POI handles captions as separate paragraphs
             )
         } catch (e: Exception) {
-            e.printStackTrace()
+            com.tosin.docprocessor.data.parser.util.TDocLogger.error("Failed to parse image", e)
             null
         }
     }

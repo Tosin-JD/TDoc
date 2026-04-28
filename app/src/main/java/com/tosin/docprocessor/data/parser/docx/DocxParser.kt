@@ -1,7 +1,12 @@
 package com.tosin.docprocessor.data.parser.docx
-
 import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.parser.DocumentParser
+import com.tosin.docprocessor.data.parser.exception.ParseErrorContext
+import com.tosin.docprocessor.data.parser.exception.ParseException
+import com.tosin.docprocessor.data.parser.recovery.GracefulDegradationStrategy
+import com.tosin.docprocessor.data.parser.recovery.RecoveryStrategy
+import com.tosin.docprocessor.data.parser.util.TDocLogger
+import com.tosin.docprocessor.data.parser.validation.DocumentValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.apache.poi.util.Units
@@ -29,51 +34,92 @@ class DocxParser(
         DocxPackageMetadataExtractor(),
         DocxAdvancedMarkupExtractor(),
         DocxEdgeCaseExtractor()
-    )
+    ),
+    private val validator: DocumentValidator = DocumentValidator(),
+    private val recoveryStrategy: RecoveryStrategy = GracefulDegradationStrategy()
 ) : DocumentParser {
 
     override suspend fun parse(inputStream: InputStream): Result<List<DocumentElement>> =
         withContext(Dispatchers.IO) {
+            var bytesRead: Long = 0
+            var currentElement: String? = null
             try {
+                TDocLogger.info("Starting DOCX parsing")
                 val bytes = inputStream.readBytes()
+                bytesRead = bytes.size.toLong()
+                
+                currentElement = "XWPFDocument"
                 val doc = XWPFDocument(ByteArrayInputStream(bytes))
+                
+                currentElement = "DocxPackage"
                 val docxPackage = DocxPackage.from(bytes)
+                
                 val elements = mutableListOf<DocumentElement>()
+                
+                currentElement = "DocumentLevelElements"
                 elements += structureParser.parseDocumentLevelElements(doc)
+                
                 packageExtractors.forEach { extractor ->
+                    currentElement = "PackageExtractor: ${extractor::class.java.simpleName}"
                     elements += extractor.extract(doc, docxPackage)
                 }
 
-                for (bodyElement in doc.bodyElements) {
-                    when (bodyElement) {
-                        is XWPFParagraph -> {
-                            elements += structureParser.parseParagraphMetadata(bodyElement)
-                            elements += fieldParser.parse(bodyElement)
-                            val images = bodyElement.runs.flatMap { run ->
-                                run.embeddedPictures.mapNotNull { pic -> imageParser.parse(pic) }
+                for ((index, bodyElement) in doc.bodyElements.withIndex()) {
+                    currentElement = "BodyElement[$index]: ${bodyElement::class.java.simpleName}"
+                    try {
+                        when (bodyElement) {
+                            is XWPFParagraph -> {
+                                elements += structureParser.parseParagraphMetadata(bodyElement)
+                                elements += fieldParser.parse(bodyElement)
+                                val images = bodyElement.runs.flatMap { run ->
+                                    run.embeddedPictures.mapNotNull { pic -> imageParser.parse(pic) }
+                                }
+                                elements.addAll(images)
+                                elements += bodyElement.runs.flatMap { run -> drawingParser.parse(run) }
+                                appendParagraphElements(elements, bodyElement)
+                                elements += pageBreakParser.parse(bodyElement)
                             }
-                            elements.addAll(images)
-                            elements += bodyElement.runs.flatMap { run -> drawingParser.parse(run) }
-                            appendParagraphElements(elements, bodyElement)
-                            elements += pageBreakParser.parse(bodyElement)
+                            is XWPFTable -> {
+                                elements.add(tableParser.parse(bodyElement))
+                            }
                         }
-                        is XWPFTable -> {
-                            elements.add(tableParser.parse(bodyElement))
+                    } catch (e: Exception) {
+                        recoveryStrategy.handleFailure("BodyElement[$index]", e) {
+                            // Skip this element
                         }
                     }
                 }
 
+                val validationResult = validator.validate(elements)
+                if (!validationResult.isValid) {
+                    TDocLogger.warn("Document validation failed: ${validationResult.errors}")
+                }
+
+                TDocLogger.info("Successfully parsed DOCX with ${elements.size} elements")
                 Result.success(elements)
             } catch (e: Exception) {
-                Result.failure(e)
+                val context = ParseErrorContext(
+                    bytesParsed = bytesRead,
+                    currentElement = currentElement
+                )
+                TDocLogger.error("Failed to parse DOCX", e, mapOf(
+                    "bytesRead" to bytesRead,
+                    "lastElement" to currentElement
+                ))
+                Result.failure(ParseException("Failed to parse DOCX: ${e.message}", context, e))
             } finally {
-                try { inputStream.close() } catch (_: Exception) {}
+                try {
+                    inputStream.close()
+                } catch (e: Exception) {
+                    TDocLogger.warn("Failed to close inputStream", e)
+                }
             }
         }
 
     override suspend fun save(outputStream: OutputStream, content: List<DocumentElement>): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
+                TDocLogger.info("Starting DOCX save")
                 XWPFDocument().use { document ->
                     content.forEach { element ->
                         when (element) {
@@ -105,8 +151,10 @@ class DocxParser(
                     }
                     document.write(outputStream)
                 }
+                TDocLogger.info("Successfully saved DOCX")
                 Result.success(Unit)
             } catch (e: Exception) {
+                TDocLogger.error("Failed to save DOCX", e)
                 Result.failure(e)
             }
         }

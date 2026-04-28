@@ -1,6 +1,7 @@
 package com.tosin.docprocessor.data.parser.odt
-
 import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.data.parser.recovery.GracefulDegradationStrategy
+import com.tosin.docprocessor.data.parser.recovery.RecoveryStrategy
 import org.w3c.dom.Element
 import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
@@ -9,7 +10,8 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 class OdtXmlParser(
     private val cacheDir: File,
-    private val zipEntries: Map<String, ByteArray>
+    private val zipEntries: Map<String, ByteArray>,
+    private val recoveryStrategy: RecoveryStrategy = GracefulDegradationStrategy()
 ) {
 
     private val officeNs = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
@@ -55,12 +57,18 @@ class OdtXmlParser(
             val child = children.item(i)
             if (child.nodeType == Node.ELEMENT_NODE) {
                 val element = child as Element
-                when (element.localName) {
-                    "h" -> output += paragraphParser.parseHeader(element)
-                    "p" -> output += paragraphParser.parseParagraph(element)
-                    "table" -> output += tableParser.parseTable(element)
-                    "frame" -> imageParser.parseImage(element)?.let { output += it }
-                    else -> traverse(child, output) // Recursive for sections/lists etc.
+                try {
+                    when (element.localName) {
+                        "h" -> output += paragraphParser.parseHeader(element)
+                        "p" -> output += paragraphParser.parseParagraph(element)
+                        "table" -> output += tableParser.parseTable(element)
+                        "frame" -> imageParser.parseImage(element)?.let { output += it }
+                        else -> traverse(child, output) // Recursive for sections/lists etc.
+                    }
+                } catch (e: Exception) {
+                    recoveryStrategy.handleFailure("ODT Element: ${element.localName}", e) {
+                        // Skip this element
+                    }
                 }
             }
         }
