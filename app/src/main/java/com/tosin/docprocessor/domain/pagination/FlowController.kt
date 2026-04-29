@@ -54,7 +54,6 @@ class FlowController(
      */
     fun shouldNotSplit(element: DocumentElement): Boolean {
         return when (element) {
-            is DocumentElement.Table -> true
             is DocumentElement.Image -> true
             is DocumentElement.PageBreak -> true
             else -> false

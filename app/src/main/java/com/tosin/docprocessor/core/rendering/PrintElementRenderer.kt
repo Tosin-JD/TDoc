@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.common.model.layout.PositionedElement
+import com.tosin.docprocessor.data.common.model.layout.TableRenderLayout
 import com.tosin.docprocessor.domain.pagination.UnitConverter
 import java.io.File
 
@@ -27,7 +28,7 @@ class PrintElementRenderer(
 
         when (val element = positionedElement.element) {
             is DocumentElement.Image -> renderImage(element, x, y, width, height)
-            is DocumentElement.Table -> renderTableGrid(element, x, y, width, height)
+            is DocumentElement.Table -> renderTable(element, positionedElement.layoutResult, x, y, width, height)
             else -> renderTextOrPlaceholder(positionedElement.layoutResult, x, y, width, height)
         }
     }
@@ -103,13 +104,20 @@ class PrintElementRenderer(
         }
     }
 
-    private fun DrawScope.renderTableGrid(
+    private fun DrawScope.renderTable(
         element: DocumentElement.Table,
+        layoutResult: Any?,
         x: Float,
         y: Float,
         width: Float,
         height: Float
     ) {
+        val tableLayout = layoutResult as? TableRenderLayout
+        if (tableLayout == null) {
+            renderTableGridFallback(element, x, y, width, height)
+            return
+        }
+
         drawRect(
             color = Color.White,
             topLeft = Offset(x, y),
@@ -122,10 +130,68 @@ class PrintElementRenderer(
             style = Stroke(width = 1f)
         )
 
+        var currentY = y
+        val cellPaddingPx = unitConverter.ptToPx(tableLayout.cellPaddingPt)
+
+        tableLayout.rowLayouts.forEach { rowLayout ->
+            val rowHeightPx = unitConverter.ptToPx(rowLayout.heightPt)
+            if (rowLayout.isHeader) {
+                drawRect(
+                    color = Color(0xFFF2F2F2),
+                    topLeft = Offset(x, currentY),
+                    size = Size(width, rowHeightPx)
+                )
+            }
+
+            var currentX = x
+            rowLayout.cells.forEach { cell ->
+                val cellWidthPx = unitConverter.ptToPx(cell.widthPt)
+                drawRect(
+                    color = Color(0xFFB0B0B0),
+                    topLeft = Offset(currentX, currentY),
+                    size = Size(cellWidthPx, rowHeightPx),
+                    style = Stroke(width = 1f)
+                )
+
+                if (cell.layout != null && cell.text.isNotBlank()) {
+                    drawIntoCanvas { canvas ->
+                        canvas.nativeCanvas.save()
+                        canvas.nativeCanvas.translate(currentX + cellPaddingPx, currentY + cellPaddingPx)
+                        cell.layout.draw(canvas.nativeCanvas)
+                        canvas.nativeCanvas.restore()
+                    }
+                }
+
+                currentX += cellWidthPx
+            }
+
+            currentY += rowHeightPx
+        }
+    }
+
+    private fun DrawScope.renderTableGridFallback(
+        element: DocumentElement.Table,
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float
+    ) {
         val rowCount = element.rows.size.coerceAtLeast(1)
         val columnCount = element.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
         val rowHeight = height / rowCount
         val columnWidth = width / columnCount
+
+        drawRect(
+            color = Color.White,
+            topLeft = Offset(x, y),
+            size = Size(width, height)
+        )
+        drawRect(
+            color = Color(0xFF7F7F7F),
+            topLeft = Offset(x, y),
+            size = Size(width, height),
+            style = Stroke(width = 1f)
+        )
 
         for (rowIndex in 1 until rowCount) {
             val lineY = y + (rowHeight * rowIndex)

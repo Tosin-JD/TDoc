@@ -176,7 +176,7 @@ class LayoutRegistry {
     private fun classifyElement(element: DocumentElement): ElementType {
         return when (element) {
             is DocumentElement.Paragraph -> ElementType.FLOWABLE
-            is DocumentElement.Table -> ElementType.ATOMIC
+            is DocumentElement.Table -> ElementType.FLOWABLE
             is DocumentElement.Image -> ElementType.ATOMIC
             is DocumentElement.SectionHeader -> ElementType.FLOWABLE
             is DocumentElement.Section -> ElementType.FLOWABLE

@@ -7,39 +7,20 @@ import com.tosin.docprocessor.data.common.model.layout.PageDimensions
 import com.tosin.docprocessor.data.common.model.layout.PageModel
 import com.tosin.docprocessor.data.common.model.layout.PageState
 import com.tosin.docprocessor.data.common.model.layout.PositionedElement
+import com.tosin.docprocessor.data.common.model.layout.TableCellLayout
+import com.tosin.docprocessor.data.common.model.layout.TableRenderLayout
+import com.tosin.docprocessor.data.common.model.layout.TableRowLayout
+import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import kotlin.math.ceil
 
-/**
- * The core pagination algorithm: "Pouring" content into fixed-size pages.
- *
- * Algorithm Flow:
- * 1. Initialize: Start Page 1, currentY = marginTop
- * 2. Iterate: For each DocumentElement
- * 3. Measure: Get element height using TextMeasurer
- * 4. Evaluate:
- *    - If fits: Add to current page, move currentY down
- *    - If overflows:
- *      - Splittable (Paragraph): Find split point, place fragments on separate pages
- *      - Atomic (Image/Table): Move entire element to next page
- * 5. Repeat until all elements processed
- *
- * Handles:
- * - Text wrapping and line breaks
- * - Widow/Orphan prevention (FlowController)
- * - Atomic elements (cannot split)
- * - Page breaks
- * - Header/Footer placement (basic)
- */
 class PrintPaginator(
     private val textMeasurer: TextMeasurer,
     private val unitConverter: UnitConverter,
     private val registry: LayoutRegistry,
     private val flowController: FlowController
 ) : Paginator {
+    private val tableCellPaddingPt = 6f
 
-    /**
-     * Internal state for tracking pagination progress.
-     */
     private data class PaginationState(
         var currentPageIndex: Int = 0,
         var currentY: Float = 0f,
@@ -68,200 +49,222 @@ class PrintPaginator(
             )
         }
 
-        // Finalize the last page
         if (state.currentPageElements.isNotEmpty()) {
-            state.pages.add(
-                PageModel(
-                    index = state.currentPageIndex,
-                    dimensions = dimensions,
-                    elements = state.currentPageElements,
-                    state = PageState.CLEAN
-                )
-            )
+            state.pages.add(createPage(state.currentPageIndex, state.currentPageElements, dimensions))
         }
 
         return state.pages
     }
 
-    /**
-     * Process a single element and place it on the appropriate page(s).
-     */
     private fun paginateElement(
         element: DocumentElement,
         elementIndex: Int,
         dimensions: PageDimensions,
         state: PaginationState
     ) {
-        // Handle page breaks
         if (flowController.isPageBreak(element)) {
-            // Start a new page
             if (state.currentPageElements.isNotEmpty()) {
-                state.pages.add(createPage(state.currentPageIndex, state.currentPageElements, dimensions))
-                state.currentPageElements = mutableListOf()
+                advanceToNextPage(state, dimensions)
+            } else {
+                state.currentPageIndex++
+                state.currentY = dimensions.marginTop
             }
-            state.currentPageIndex++
-            state.currentY = dimensions.marginTop
             return
         }
 
-        val elementHeight = measureElement(element, dimensions)
+        var pending: DocumentElement? = element
 
-        // Check if element fits on current page
-        val availableSpace = dimensions.printableHeight - (state.currentY - dimensions.marginTop)
+        while (pending != null) {
+            val currentElement = pending
+            val elementHeight = measureElement(currentElement, dimensions)
+            val availableSpace = dimensions.printableHeight - (state.currentY - dimensions.marginTop)
 
-        if (elementHeight <= availableSpace) {
-            // Element fits on current page
-            addElementToPage(element, state.currentY, state.currentPageIndex, dimensions, state.currentPageElements)
-            state.currentY += elementHeight
-        } else if (flowController.shouldNotSplit(element)) {
-            // Element is atomic: move it to next page
-            if (state.currentPageElements.isNotEmpty()) {
-                state.pages.add(createPage(state.currentPageIndex, state.currentPageElements, dimensions))
-                state.currentPageElements = mutableListOf()
-            }
-            state.currentPageIndex++
-            state.currentY = dimensions.marginTop
-            
-            // Add to new page
-            addElementToPage(element, state.currentY, state.currentPageIndex, dimensions, state.currentPageElements)
-            state.currentY += elementHeight
-        } else {
-            // Element is splittable (Paragraph): split it
-            val (fragment1, fragment2) = splitElement(
-                element = element,
-                availableHeightPt = availableSpace,
-                widthPt = dimensions.printableWidth
-            )
+            if (elementHeight <= availableSpace) {
+                addElementToPage(
+                    currentElement,
+                    state.currentY,
+                    state.currentPageIndex,
+                    dimensions,
+                    state.currentPageElements
+                )
+                state.currentY += elementHeight
+                pending = null
+            } else if (flowController.shouldNotSplit(currentElement)) {
+                if (state.currentPageElements.isNotEmpty()) {
+                    advanceToNextPage(state, dimensions)
+                }
+                addElementToPage(
+                    currentElement,
+                    state.currentY,
+                    state.currentPageIndex,
+                    dimensions,
+                    state.currentPageElements
+                )
+                state.currentY += elementHeight
+                pending = null
+            } else {
+                val (fragment1, fragment2) = splitElement(
+                    element = currentElement,
+                    availableHeightPt = availableSpace,
+                    widthPt = dimensions.printableWidth
+                )
 
-            if (fragment1 != null) {
-                addElementToPage(fragment1, state.currentY, state.currentPageIndex, dimensions, state.currentPageElements)
-            }
+                val firstHeight = fragment1?.let { measureElement(it, dimensions) } ?: 0f
+                val madeProgress = fragment1 != null && firstHeight > 0f
 
-            // Move to next page with fragment2
-            if (fragment2 != null) {
-                state.pages.add(createPage(state.currentPageIndex, state.currentPageElements, dimensions))
-                state.currentPageElements = mutableListOf()
-                state.currentPageIndex++
-                state.currentY = dimensions.marginTop
+                if (fragment1 != null) {
+                    addElementToPage(
+                        fragment1,
+                        state.currentY,
+                        state.currentPageIndex,
+                        dimensions,
+                        state.currentPageElements
+                    )
+                    state.currentY += firstHeight
+                }
 
-                addElementToPage(fragment2, state.currentY, state.currentPageIndex, dimensions, state.currentPageElements)
-                val fragment2Height = measureElement(fragment2, dimensions)
-                state.currentY += fragment2Height
+                pending = fragment2
+
+                if (pending != null) {
+                    if (state.currentPageElements.isNotEmpty()) {
+                        advanceToNextPage(state, dimensions)
+                    } else if (!madeProgress) {
+                        addElementToPage(
+                            pending,
+                            state.currentY,
+                            state.currentPageIndex,
+                            dimensions,
+                            state.currentPageElements
+                        )
+                        state.currentY += measureElement(pending, dimensions)
+                        pending = null
+                    }
+                }
             }
         }
     }
 
-    /**
-     * Split a flowable element (Paragraph) into two fragments.
-     *
-     * @return Pair of (fragment1, fragment2), or (element, null) if no split needed
-     */
     private fun splitElement(
         element: DocumentElement,
         availableHeightPt: Float,
         widthPt: Float
     ): Pair<DocumentElement?, DocumentElement?> {
         return when (element) {
-            is DocumentElement.Paragraph -> {
-                if (element.spans.isEmpty()) {
-                    return Pair(element, null)
-                }
-
-                val text = element.spans.joinToString("") { it.text }
-                val lastFittingLine = textMeasurer.getLastFittingLine(
-                    element.spans,
-                    element.style,
-                    widthPt,
-                    availableHeightPt
-                )
-
-                if (lastFittingLine < 0) {
-                    // Nothing fits; return the element as-is for next page
-                    Pair(null, element)
-                } else {
-                    // Adjust for Widow/Orphan rules
-                    val fullLayout = textMeasurer.buildParagraphLayout(
-                        spans = element.spans,
-                        style = element.style,
-                        widthPt = widthPt
-                    ) ?: return Pair(element, null)
-                    val lineCount = fullLayout.lineCount
-                    val adjustedLine = flowController.adjustSplitPointForRules(lineCount, lastFittingLine)
-
-                    if (adjustedLine < 0) {
-                        // Don't split; move entire paragraph to next page
-                        Pair(null, element)
-                    } else {
-                        // Create text fragments at line boundary
-                        val charAtLineEnd = textMeasurer.getLineEnd(
-                            fullLayout,
-                            adjustedLine
-                        )
-
-                        // Split the spans based on character position
-                        val (spans1, spans2) = splitSpans(element.spans, charAtLineEnd)
-
-                        val fragment1 = element.copy(spans = spans1).takeIf { it.spans.isNotEmpty() }
-                        val fragment2 = element.copy(spans = spans2).takeIf { it.spans.isNotEmpty() }
-
-                        Pair(fragment1, fragment2)
-                    }
-                }
-            }
-            else -> Pair(element, null)  // Atomic elements shouldn't reach here
+            is DocumentElement.Paragraph -> splitParagraphElement(element, availableHeightPt, widthPt)
+            is DocumentElement.Table -> splitTableElement(element, availableHeightPt, widthPt)
+            else -> Pair(element, null)
         }
     }
 
-    /**
-     * Split text spans at a character position.
-     * Maintains the text integrity and span properties.
-     */
+    private fun splitParagraphElement(
+        element: DocumentElement.Paragraph,
+        availableHeightPt: Float,
+        widthPt: Float
+    ): Pair<DocumentElement?, DocumentElement?> {
+        if (element.spans.isEmpty()) return Pair(element, null)
+
+        val lastFittingLine = textMeasurer.getLastFittingLine(
+            element.spans,
+            element.style,
+            widthPt,
+            availableHeightPt
+        )
+
+        if (lastFittingLine < 0) {
+            return Pair(null, element)
+        }
+
+        val fullLayout = textMeasurer.buildParagraphLayout(
+            spans = element.spans,
+            style = element.style,
+            widthPt = widthPt
+        ) ?: return Pair(element, null)
+
+        val adjustedLine = flowController.adjustSplitPointForRules(fullLayout.lineCount, lastFittingLine)
+        if (adjustedLine < 0) {
+            return Pair(null, element)
+        }
+
+        val charAtLineEnd = textMeasurer.getLineEnd(fullLayout, adjustedLine)
+        val (spans1, spans2) = splitSpans(element.spans, charAtLineEnd)
+        val fragment1 = element.copy(spans = spans1).takeIf { it.spans.isNotEmpty() }
+        val fragment2 = element.copy(spans = spans2).takeIf { it.spans.isNotEmpty() }
+        return Pair(fragment1, fragment2)
+    }
+
+    private fun splitTableElement(
+        element: DocumentElement.Table,
+        availableHeightPt: Float,
+        widthPt: Float
+    ): Pair<DocumentElement?, DocumentElement?> {
+        if (element.rows.isEmpty()) return Pair(element, null)
+
+        val layout = buildTableLayout(element, widthPt)
+        if (layout.rowLayouts.isEmpty()) return Pair(element, null)
+
+        val headerRows = if (element.hasHeader) 1 else 0
+        var consumedHeight = 0f
+        var rowsThatFit = 0
+
+        layout.rowLayouts.forEachIndexed { index, rowLayout ->
+            val nextHeight = consumedHeight + rowLayout.heightPt
+            if (nextHeight <= availableHeightPt) {
+                consumedHeight = nextHeight
+                rowsThatFit = index + 1
+            }
+        }
+
+        if (rowsThatFit <= headerRows) {
+            return Pair(null, element)
+        }
+
+        if (rowsThatFit >= element.rows.size) {
+            return Pair(element, null)
+        }
+
+        val firstRows = element.rows.take(rowsThatFit)
+        val remainingRows = buildList {
+            if (element.hasHeader) {
+                add(element.rows.first())
+            }
+            addAll(element.rows.drop(rowsThatFit))
+        }
+
+        return Pair(
+            element.copy(rows = firstRows),
+            element.copy(rows = remainingRows)
+        )
+    }
+
     private fun splitSpans(
-        spans: List<com.tosin.docprocessor.data.parser.internal.models.TextSpan>,
+        spans: List<TextSpan>,
         splitCharPosition: Int
-    ): Pair<List<com.tosin.docprocessor.data.parser.internal.models.TextSpan>, List<com.tosin.docprocessor.data.parser.internal.models.TextSpan>> {
-        val spans1 = mutableListOf<com.tosin.docprocessor.data.parser.internal.models.TextSpan>()
-        val spans2 = mutableListOf<com.tosin.docprocessor.data.parser.internal.models.TextSpan>()
+    ): Pair<List<TextSpan>, List<TextSpan>> {
+        val spans1 = mutableListOf<TextSpan>()
+        val spans2 = mutableListOf<TextSpan>()
 
         var charCount = 0
         for (span in spans) {
             val spanEnd = charCount + span.text.length
 
             when {
-                spanEnd <= splitCharPosition -> {
-                    // Entire span goes to first half
-                    spans1.add(span)
-                }
-                charCount >= splitCharPosition -> {
-                    // Entire span goes to second half
-                    spans2.add(span)
-                }
+                spanEnd <= splitCharPosition -> spans1.add(span)
+                charCount >= splitCharPosition -> spans2.add(span)
                 else -> {
-                    // Span is split
                     val splitInSpan = splitCharPosition - charCount
-                    val text1 = span.text.substring(0, splitInSpan)
-                    val text2 = span.text.substring(splitInSpan)
-
-                    spans1.add(span.copy(text = text1))
-                    spans2.add(span.copy(text = text2))
+                    spans1.add(span.copy(text = span.text.substring(0, splitInSpan)))
+                    spans2.add(span.copy(text = span.text.substring(splitInSpan)))
                 }
             }
+
             charCount = spanEnd
         }
 
         return Pair(spans1, spans2)
     }
 
-    /**
-     * Measure the height of an element.
-     * Uses cache when available.
-     */
     private fun measureElement(element: DocumentElement, dimensions: PageDimensions): Float {
-        // Check cache first
-        val cached = registry.get(element.id, element)
-        if (cached != null) {
-            return cached
-        }
+        registry.get(element.id, element)?.let { return it }
 
         val height = when (element) {
             is DocumentElement.Paragraph -> {
@@ -276,30 +279,17 @@ class PrintPaginator(
                 )
             }
             is DocumentElement.Table -> {
-                // Simple table height estimation: rows * 20pt per row
-                (element.rows.size * 20f).coerceAtLeast(40f)
+                buildTableLayout(element, dimensions.printableWidth).totalHeightPt.coerceAtLeast(24f)
             }
-            is DocumentElement.Image -> {
-                // Assume 200pt height for images (adjust based on actual aspect ratio)
-                200f
-            }
-            is DocumentElement.PageBreak -> {
-                0f  // Page breaks have no height
-            }
-            else -> {
-                // Default to minimal height for unknown types
-                10f
-            }
+            is DocumentElement.Image -> 200f
+            is DocumentElement.PageBreak -> 0f
+            else -> 10f
         }
 
-        // Cache the measurement
         registry.put(element.id, element, height)
         return height
     }
 
-    /**
-     * Add an element to the current page.
-     */
     private fun addElementToPage(
         element: DocumentElement,
         yPositionPt: Float,
@@ -315,16 +305,16 @@ class PrintPaginator(
             yPositionPt + elementHeight
         )
 
-        val positioned = PositionedElement(
-            elementId = element.id,
-            element = element,
-            pageIndex = pageIndex,
-            bounds = bounds,
-            metadata = mapOf("originalHeight" to elementHeight),
-            layoutResult = createLayoutResult(element, dimensions.printableWidth)
+        pageElements.add(
+            PositionedElement(
+                elementId = element.id,
+                element = element,
+                pageIndex = pageIndex,
+                bounds = bounds,
+                metadata = mapOf("originalHeight" to elementHeight),
+                layoutResult = createLayoutResult(element, dimensions.printableWidth)
+            )
         )
-
-        pageElements.add(positioned)
     }
 
     private fun createLayoutResult(
@@ -343,6 +333,7 @@ class PrintPaginator(
                     widthPt = widthPt
                 )
             }
+            is DocumentElement.Table -> buildTableLayout(element, widthPt)
             is DocumentElement.Section -> {
                 textMeasurer.buildPlainTextLayout(
                     text = element.properties.toString(),
@@ -414,9 +405,47 @@ class PrintPaginator(
         }
     }
 
-    /**
-     * Create a page model from elements.
-     */
+    private fun buildTableLayout(
+        element: DocumentElement.Table,
+        widthPt: Float
+    ): TableRenderLayout {
+        val columnCount = element.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
+        val cellWidthPt = widthPt / columnCount
+        val contentWidthPt = (cellWidthPt - (tableCellPaddingPt * 2f)).coerceAtLeast(12f)
+
+        val rowLayouts = element.rows.ifEmpty { listOf(emptyList()) }.mapIndexed { rowIndex, row ->
+            val cells = List(columnCount) { columnIndex ->
+                val text = row.getOrNull(columnIndex).orEmpty()
+                val layout = textMeasurer.buildPlainTextLayout(
+                    text = text.ifEmpty { " " },
+                    fontSize = 10f,
+                    isBold = element.hasHeader && rowIndex == 0,
+                    widthPt = contentWidthPt
+                )
+
+                TableCellLayout(
+                    text = text,
+                    widthPt = cellWidthPt,
+                    contentHeightPt = layout?.let { unitConverter.pxToPt(it.height.toFloat()) } ?: 0f,
+                    layout = layout
+                )
+            }
+
+            val rowHeight = (cells.maxOfOrNull { it.contentHeightPt } ?: 0f) + (tableCellPaddingPt * 2f)
+            TableRowLayout(
+                heightPt = rowHeight.coerceAtLeast(24f),
+                cells = cells,
+                isHeader = element.hasHeader && rowIndex == 0
+            )
+        }
+
+        return TableRenderLayout(
+            columnCount = columnCount,
+            rowLayouts = rowLayouts,
+            cellPaddingPt = tableCellPaddingPt
+        )
+    }
+
     private fun createPage(
         index: Int,
         elements: List<PositionedElement>,
@@ -430,9 +459,6 @@ class PrintPaginator(
         )
     }
 
-    /**
-     * Create an empty page.
-     */
     private fun createEmptyPage(index: Int, dimensions: PageDimensions): PageModel {
         return PageModel(
             index = index,
@@ -440,6 +466,16 @@ class PrintPaginator(
             elements = emptyList(),
             state = PageState.CLEAN
         )
+    }
+
+    private fun advanceToNextPage(
+        state: PaginationState,
+        dimensions: PageDimensions
+    ) {
+        state.pages.add(createPage(state.currentPageIndex, state.currentPageElements, dimensions))
+        state.currentPageElements = mutableListOf()
+        state.currentPageIndex++
+        state.currentY = dimensions.marginTop
     }
 
     override fun estimatePageCount(
@@ -462,7 +498,7 @@ class PrintPaginator(
                         widthPt = dimensions.printableWidth
                     )
                 }
-                is DocumentElement.Table -> (element.rows.size * 20f).coerceAtLeast(40f)
+                is DocumentElement.Table -> buildTableLayout(element, dimensions.printableWidth).totalHeightPt
                 is DocumentElement.Image -> 200f
                 else -> 10f
             }

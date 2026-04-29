@@ -56,7 +56,13 @@ class TextMeasurer(
     ): Int {
         val layout = buildParagraphLayout(spans, style, widthPt) ?: return -1
         val maxHeightPx = unitConverter.ptToPx(maxHeightPt).toInt().coerceAtLeast(0)
-        return layout.getLineForVertical(maxHeightPx)
+        var line = layout.getLineForVertical(maxHeightPx)
+
+        while (line >= 0 && layout.getLineBottom(line) > maxHeightPx) {
+            line--
+        }
+
+        return line
     }
 
     fun buildParagraphLayout(
@@ -173,6 +179,8 @@ class TextMeasurer(
         return StaticLayout.Builder.obtain(text, 0, text.length, paint, widthPx)
             .setAlignment(alignment)
             .setLineSpacing(lineSpacingPx, 1f)
+            .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
+            .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
             .setIncludePad(true)
             .build()
     }
