@@ -12,6 +12,8 @@ class DocxPackage private constructor(
 ) {
 
     companion object {
+        fun from(entries: Map<String, ByteArray>): DocxPackage = DocxPackage(LinkedHashMap(entries))
+
         fun from(bytes: ByteArray): DocxPackage {
             val parts = linkedMapOf<String, ByteArray>()
             ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
@@ -39,6 +41,8 @@ class DocxPackage private constructor(
     }
 
     fun text(path: String): String? = entries[path]?.decodeToString()
+
+    fun bytes(path: String): ByteArray? = entries[path]
 
     fun paths(prefix: String, suffix: String = ".xml"): List<String> =
         entries.keys

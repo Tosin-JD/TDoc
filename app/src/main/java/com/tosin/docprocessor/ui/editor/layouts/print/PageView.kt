@@ -81,7 +81,7 @@ fun PageView(
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 12.dp)
     ) {
-        val pageWidth = minOf(maxWidth, 900.dp)
+        val pageWidth = minOf(maxWidth, 760.dp)
         val pageHeight = pageWidth / pageAspectRatio
         val pageWidthPx = with(density) { pageWidth.toPx() }
         val pageHeightPx = with(density) { pageHeight.toPx() }

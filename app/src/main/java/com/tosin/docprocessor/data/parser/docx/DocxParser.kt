@@ -1,92 +1,60 @@
 package com.tosin.docprocessor.data.parser.docx
+
 import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.parser.DocumentParser
 import com.tosin.docprocessor.data.parser.exception.ParseErrorContext
 import com.tosin.docprocessor.data.parser.exception.ParseException
+import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
+import com.tosin.docprocessor.data.parser.internal.models.ParagraphIndentation
+import com.tosin.docprocessor.data.parser.internal.models.ParagraphSpacing
+import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
+import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import com.tosin.docprocessor.data.parser.recovery.GracefulDegradationStrategy
 import com.tosin.docprocessor.data.parser.recovery.RecoveryStrategy
+import com.tosin.docprocessor.data.parser.util.DefaultZipExtractor
 import com.tosin.docprocessor.data.parser.util.TDocLogger
+import com.tosin.docprocessor.data.parser.util.ZipExtractor
 import com.tosin.docprocessor.data.parser.validation.DocumentValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.apache.poi.util.Units
-import org.apache.poi.xwpf.usermodel.BreakType
-import org.apache.poi.xwpf.usermodel.XWPFDocument
-import org.apache.poi.xwpf.usermodel.XWPFParagraph
-import org.apache.poi.xwpf.usermodel.XWPFTable
-import org.apache.poi.xwpf.usermodel.ParagraphAlignment as PoiParagraphAlignment
-import org.apache.poi.xwpf.usermodel.UnderlinePatterns
-import java.io.InputStream
+import org.w3c.dom.Document
+import org.w3c.dom.Element
+import java.io.File
 import java.io.OutputStream
-import java.io.ByteArrayInputStream
-import java.io.FileInputStream
-import org.apache.poi.xwpf.usermodel.Document as PoiDocument
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class DocxParser(
-    private val paragraphParser: DocxParagraphParser = DocxParagraphParser(DocxListParser()),
-    private val tableParser: DocxTableParser = DocxTableParser(),
-    private val imageParser: DocxImageParser,
-    private val structureParser: DocxStructureParser = DocxStructureParser(paragraphParser, tableParser),
-    private val fieldParser: DocxFieldParser = DocxFieldParser(),
-    private val drawingParser: DocxDrawingParser = DocxDrawingParser(),
-    private val pageBreakParser: DocxPageBreakParser = DocxPageBreakParser(),
-    private val packageExtractors: List<DocxPackageExtractor> = listOf(
-        DocxPackageMetadataExtractor(),
-        DocxAdvancedMarkupExtractor(),
-        DocxEdgeCaseExtractor()
-    ),
+    private val cacheDir: File,
+    private val zipExtractor: ZipExtractor = DefaultZipExtractor(),
     private val validator: DocumentValidator = DocumentValidator(),
     private val recoveryStrategy: RecoveryStrategy = GracefulDegradationStrategy()
 ) : DocumentParser {
 
-    override suspend fun parse(inputStream: InputStream): Result<List<DocumentElement>> =
+    override suspend fun parse(inputStream: java.io.InputStream): Result<List<DocumentElement>> =
         withContext(Dispatchers.IO) {
-            var bytesRead: Long = 0
             var currentElement: String? = null
             try {
                 TDocLogger.info("Starting DOCX parsing")
-                val bytes = inputStream.readBytes()
-                bytesRead = bytes.size.toLong()
-                
-                currentElement = "XWPFDocument"
-                val doc = XWPFDocument(ByteArrayInputStream(bytes))
-                
-                currentElement = "DocxPackage"
-                val docxPackage = DocxPackage.from(bytes)
-                
-                val elements = mutableListOf<DocumentElement>()
-                
-                currentElement = "DocumentLevelElements"
-                elements += structureParser.parseDocumentLevelElements(doc)
-                
-                packageExtractors.forEach { extractor ->
-                    currentElement = "PackageExtractor: ${extractor::class.java.simpleName}"
-                    elements += extractor.extract(doc, docxPackage)
-                }
+                val entries = zipExtractor.extract(inputStream)
+                val docxPackage = DocxPackage.from(entries)
+                val documentXml = docxPackage.xml("word/document.xml")
+                    ?: throw IllegalArgumentException("Not a valid DOCX file: missing word/document.xml")
+                val styles = parseStyles(docxPackage.xml("word/styles.xml"))
+                val relationships = docxPackage.relationshipsFor("word/document.xml")
+                val body = documentXml.documentElement?.firstChild("body")
+                    ?: throw IllegalArgumentException("DOCX document is missing body")
 
-                for ((index, bodyElement) in doc.bodyElements.withIndex()) {
-                    currentElement = "BodyElement[$index]: ${bodyElement::class.java.simpleName}"
+                val elements = mutableListOf<DocumentElement>()
+                body.children().forEachIndexed { index, child ->
+                    currentElement = "BodyElement[$index]: ${child.nodeName}"
                     try {
-                        when (bodyElement) {
-                            is XWPFParagraph -> {
-                                elements += structureParser.parseParagraphMetadata(bodyElement)
-                                elements += fieldParser.parse(bodyElement)
-                                val images = bodyElement.runs.flatMap { run ->
-                                    run.embeddedPictures.mapNotNull { pic -> imageParser.parse(pic) }
-                                }
-                                elements.addAll(images)
-                                elements += bodyElement.runs.flatMap { run -> drawingParser.parse(run) }
-                                appendParagraphElements(elements, bodyElement)
-                                elements += pageBreakParser.parse(bodyElement)
-                            }
-                            is XWPFTable -> {
-                                elements.add(tableParser.parse(bodyElement))
-                            }
+                        when {
+                            child.matches("p") -> elements += parseParagraph(child, styles, relationships, docxPackage)
+                            child.matches("tbl") -> parseTable(child)?.let { elements += it }
                         }
-                    } catch (e: Exception) {
-                        recoveryStrategy.handleFailure("BodyElement[$index]", e) {
-                            // Skip this element
-                        }
+                    } catch (error: Exception) {
+                        recoveryStrategy.handleFailure(currentElement!!, error) { Unit }
                     }
                 }
 
@@ -98,60 +66,22 @@ class DocxParser(
                 TDocLogger.info("Successfully parsed DOCX with ${elements.size} elements")
                 Result.success(elements)
             } catch (e: Exception) {
-                val context = ParseErrorContext(
-                    bytesParsed = bytesRead,
-                    currentElement = currentElement
-                )
-                TDocLogger.error("Failed to parse DOCX", e, mapOf(
-                    "bytesRead" to bytesRead,
-                    "lastElement" to currentElement
-                ))
+                val context = ParseErrorContext(currentElement = currentElement)
+                TDocLogger.error("Failed to parse DOCX", e, mapOf("lastElement" to currentElement))
                 Result.failure(ParseException("Failed to parse DOCX: ${e.message}", context, e))
-            } finally {
-                try {
-                    inputStream.close()
-                } catch (e: Exception) {
-                    TDocLogger.warn("Failed to close inputStream", e)
-                }
             }
         }
 
     override suspend fun save(outputStream: OutputStream, content: List<DocumentElement>): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
-                TDocLogger.info("Starting DOCX save")
-                XWPFDocument().use { document ->
-                    content.forEach { element ->
-                        when (element) {
-                            is DocumentElement.Paragraph -> writeParagraph(document, element)
-                            is DocumentElement.SectionHeader -> writeHeader(document, element)
-                            is DocumentElement.Section -> writeStructureSummary(document, element.properties.toString())
-                            is DocumentElement.HeaderFooter -> writeStructureSummary(document, element.content.text)
-                            is DocumentElement.Note -> writeStructureSummary(document, element.info.text)
-                            is DocumentElement.Comment -> writeStructureSummary(document, element.info.text)
-                            is DocumentElement.Bookmark -> writeStructureSummary(document, element.info.name)
-                            is DocumentElement.Field -> writeStructureSummary(document, element.info.instruction)
-                            is DocumentElement.Metadata -> writeStructureSummary(
-                                document,
-                                buildString {
-                                    append(element.info.title ?: element.info.kind)
-                                    append(": ")
-                                    append(element.info.summary)
-                                }
-                            )
-                            is DocumentElement.Drawing -> writeStructureSummary(document, element.info.kind)
-                            is DocumentElement.EmbeddedObject -> writeStructureSummary(
-                                document,
-                                element.info.description ?: element.info.kind
-                            )
-                            is DocumentElement.Table -> writeTable(document, element)
-                            is DocumentElement.Image -> writeImage(document, element)
-                            is DocumentElement.PageBreak -> document.createParagraph().createRun().addBreak(BreakType.PAGE)
-                        }
-                    }
-                    document.write(outputStream)
+                ZipOutputStream(outputStream).use { zip ->
+                    writeZipEntry(zip, "[Content_Types].xml", buildContentTypesXml())
+                    writeZipEntry(zip, "_rels/.rels", buildRootRelationshipsXml())
+                    writeZipEntry(zip, "word/document.xml", buildDocumentXml(content))
+                    writeZipEntry(zip, "word/styles.xml", buildStylesXml())
+                    writeZipEntry(zip, "word/_rels/document.xml.rels", buildDocumentRelationshipsXml())
                 }
-                TDocLogger.info("Successfully saved DOCX")
                 Result.success(Unit)
             } catch (e: Exception) {
                 TDocLogger.error("Failed to save DOCX", e)
@@ -159,139 +89,371 @@ class DocxParser(
             }
         }
 
-    private fun writeParagraph(document: XWPFDocument, paragraph: DocumentElement.Paragraph) {
-        val poiParagraph = document.createParagraph()
-        applyParagraphStyle(poiParagraph, paragraph)
-        paragraph.listLabel?.takeIf { it.isNotBlank() }?.let { label ->
-            poiParagraph.createRun().setText("$label ")
-        }
-        paragraph.spans.forEach { span ->
-            val run = poiParagraph.createRun()
-            run.isBold = span.isBold
-            run.isItalic = span.isItalic
-            run.setUnderline(if (span.isUnderline) UnderlinePatterns.SINGLE else UnderlinePatterns.NONE)
-            run.isStrikeThrough = span.isStrikethrough
-            run.fontFamily = span.fontFamily
-            span.fontSize?.let { run.fontSize = it }
-            run.color = span.color.removePrefix("#")
-            span.highlightColor?.let { run.setTextHighlightColor(it) }
-            span.characterSpacing?.let { run.characterSpacing = it }
-            span.language?.let { run.lang = it }
-            run.setText(span.text)
-        }
-    }
+    private fun parseParagraph(
+        paragraph: Element,
+        styles: Map<String, ParagraphStyle>,
+        relationships: Map<String, String>,
+        docxPackage: DocxPackage
+    ): List<DocumentElement> {
+        val paragraphStyle = resolveParagraphStyle(paragraph, styles)
+        val elements = mutableListOf<DocumentElement>()
+        val spans = mutableListOf<TextSpan>()
 
-    private fun writeHeader(document: XWPFDocument, header: DocumentElement.SectionHeader) {
-        val paragraph = document.createParagraph()
-        val run = paragraph.createRun()
-        run.isBold = true
-        paragraph.style = "Heading${header.level.coerceIn(1, 9)}"
-        run.fontSize = when (header.level) {
-            1 -> 20
-            2 -> 16
-            else -> 14
-        }
-        run.setText(header.text)
-    }
-
-    private fun writeStructureSummary(document: XWPFDocument, text: String) {
-        if (text.isBlank()) return
-        document.createParagraph().createRun().setText(text)
-    }
-
-    private fun writeTable(document: XWPFDocument, table: DocumentElement.Table) {
-        if (table.rows.isEmpty()) return
-
-        val poiTable = document.createTable(table.rows.size, table.rows.firstOrNull()?.size ?: 1)
-        table.rows.forEachIndexed { rowIndex, row ->
-            val tableRow = poiTable.getRow(rowIndex)
-            row.forEachIndexed { cellIndex, cellText ->
-                tableRow.getCell(cellIndex).text = cellText
+        fun flushParagraph() {
+            if (spans.isEmpty()) return
+            val paragraphText = spans.joinToString("") { it.text }
+            if (paragraphText.isBlank()) {
+                spans.clear()
+                return
+            }
+            val snapshot = spans.toList()
+            spans.clear()
+            if (paragraphStyle.headingLevel != null && paragraphText.isNotBlank()) {
+                elements += DocumentElement.SectionHeader(
+                    text = paragraphText.trim(),
+                    level = paragraphStyle.headingLevel
+                )
+            } else {
+                elements += DocumentElement.Paragraph(
+                    spans = snapshot,
+                    style = paragraphStyle
+                )
             }
         }
-    }
 
-    private fun writeImage(document: XWPFDocument, image: DocumentElement.Image) {
-        val imageFile = java.io.File(image.sourceUri)
-        if (!imageFile.exists()) {
-            image.caption?.takeIf { it.isNotBlank() }?.let { caption ->
-                document.createParagraph().createRun().setText(caption)
+        paragraph.children().forEach { child ->
+            when {
+                child.matches("r") -> {
+                    val runContent = parseRun(child)
+                    if (runContent.pageBreak) {
+                        flushParagraph()
+                        elements += DocumentElement.PageBreak()
+                    }
+                    runContent.image?.let {
+                        flushParagraph()
+                        parseImage(it, relationships, docxPackage)?.let(elements::add)
+                    }
+                    spans += runContent.spans
+                }
+                child.matches("hyperlink") -> {
+                    child.children("r").forEach { run ->
+                        val runContent = parseRun(run)
+                        if (runContent.pageBreak) {
+                            flushParagraph()
+                            elements += DocumentElement.PageBreak()
+                        }
+                        runContent.image?.let {
+                            flushParagraph()
+                            parseImage(it, relationships, docxPackage)?.let(elements::add)
+                        }
+                        spans += runContent.spans
+                    }
+                }
             }
-            return
         }
 
-        FileInputStream(imageFile).use { imageStream ->
-            val pictureType = when (imageFile.extension.lowercase()) {
-                "png" -> PoiDocument.PICTURE_TYPE_PNG
-                "jpg", "jpeg" -> PoiDocument.PICTURE_TYPE_JPEG
-                "gif" -> PoiDocument.PICTURE_TYPE_GIF
-                "bmp" -> PoiDocument.PICTURE_TYPE_BMP
-                "webp" -> PoiDocument.PICTURE_TYPE_PNG
-                else -> PoiDocument.PICTURE_TYPE_PNG
+        flushParagraph()
+        return elements
+    }
+
+    private fun parseTable(table: Element): DocumentElement.Table? {
+        val rows = table.children("tr").map { row ->
+            row.children("tc").map { cell ->
+                cell.descendants("p")
+                    .mapNotNull { paragraph ->
+                        val text = paragraph.descendants("t").joinToString("") { it.textContent.orEmpty() }
+                            .ifBlank {
+                                paragraph.descendants("tab").joinToString("") { "\t" } +
+                                    paragraph.descendants("br").joinToString("") { "\n" }
+                            }
+                        text.takeIf { it.isNotBlank() }
+                    }
+                    .joinToString("\n")
             }
-            val paragraph = document.createParagraph()
-            val run = paragraph.createRun()
-            run.addPicture(
-                imageStream,
-                pictureType,
-                imageFile.name,
-                Units.toEMU(400.0),
-                Units.toEMU(300.0)
+        }.filter { row -> row.isNotEmpty() }
+
+        return if (rows.isEmpty()) null else DocumentElement.Table(rows = rows)
+    }
+
+    private fun parseRun(run: Element): RunContent {
+        val runProperties = run.firstChild("rPr")
+        val spans = mutableListOf<TextSpan>()
+        val builder = StringBuilder()
+        var pageBreak = false
+
+        run.children().forEach { child ->
+            when {
+                child.matches("t") -> builder.append(child.textContent.orEmpty())
+                child.matches("tab") -> builder.append('\t')
+                child.matches("br") -> {
+                    val breakType = child.attribute("type")
+                    if (breakType == "page") {
+                        pageBreak = true
+                    } else {
+                        builder.append('\n')
+                    }
+                }
+            }
+        }
+
+        val drawing = run.descendants("drawing").firstOrNull()
+        val text = builder.toString()
+        if (text.isNotEmpty()) {
+            spans += TextSpan(
+                text = text,
+                isBold = runProperties?.firstChild("b") != null,
+                isItalic = runProperties?.firstChild("i") != null,
+                isUnderline = runProperties?.firstChild("u") != null,
+                isStrikethrough = runProperties?.firstChild("strike") != null || runProperties?.firstChild("dstrike") != null,
+                isSuperscript = runProperties?.descendants("vertAlign")?.firstOrNull()?.attribute("val") == "superscript",
+                isSubscript = runProperties?.descendants("vertAlign")?.firstOrNull()?.attribute("val") == "subscript",
+                fontFamily = runProperties?.descendants("rFonts")?.firstOrNull()?.attribute("ascii"),
+                fontSize = runProperties?.descendants("sz")?.firstOrNull()?.attribute("val")?.toIntOrNull()?.div(2),
+                color = runProperties?.descendants("color")?.firstOrNull()?.attribute("val") ?: "000000"
             )
         }
 
-        image.caption?.takeIf { it.isNotBlank() }?.let { caption ->
-            document.createParagraph().createRun().setText(caption)
+        return RunContent(
+            spans = spans,
+            image = drawing,
+            pageBreak = pageBreak
+        )
+    }
+
+    private fun parseImage(
+        drawing: Element,
+        relationships: Map<String, String>,
+        docxPackage: DocxPackage
+    ): DocumentElement.Image? {
+        val blip = drawing.descendants("blip").firstOrNull() ?: return null
+        val relId = blip.attribute("embed") ?: return null
+        val target = relationships[relId] ?: return null
+        val bytes = docxPackage.bytes(target) ?: return null
+        val fileName = target.substringAfterLast('/')
+        val safeName = fileName.ifBlank { "image.bin" }
+        val cachedFile = File(cacheDir, "docx_${System.currentTimeMillis()}_$safeName")
+        cachedFile.writeBytes(bytes)
+        val docPr = drawing.descendants("docPr").firstOrNull()
+        return DocumentElement.Image(
+            sourceUri = cachedFile.absolutePath,
+            altText = docPr?.attribute("descr") ?: docPr?.attribute("title"),
+            caption = null
+        )
+    }
+
+    private fun parseStyles(stylesDocument: Document?): Map<String, ParagraphStyle> {
+        if (stylesDocument == null) return emptyMap()
+        return stylesDocument.documentElement
+            .descendants("style")
+            .mapNotNull { style ->
+                val styleId = style.attribute("styleId") ?: return@mapNotNull null
+                val name = style.firstChild("name")?.attribute("val")
+                val paragraphProperties = style.firstChild("pPr")
+                val headingLevel = paragraphProperties?.firstChild("outlineLvl")?.attribute("val")?.toIntOrNull()?.plus(1)
+                    ?: extractHeadingLevel(styleId, name)
+
+                styleId to ParagraphStyle(
+                    styleId = styleId,
+                    styleName = name,
+                    alignment = parseAlignment(paragraphProperties?.firstChild("jc")?.attribute("val")),
+                    indentation = ParagraphIndentation(
+                        left = paragraphProperties?.firstChild("ind")?.attribute("left")?.toIntOrNull(),
+                        right = paragraphProperties?.firstChild("ind")?.attribute("right")?.toIntOrNull(),
+                        firstLine = paragraphProperties?.firstChild("ind")?.attribute("firstLine")?.toIntOrNull(),
+                        hanging = paragraphProperties?.firstChild("ind")?.attribute("hanging")?.toIntOrNull()
+                    ),
+                    spacing = ParagraphSpacing(
+                        before = paragraphProperties?.firstChild("spacing")?.attribute("before")?.toIntOrNull(),
+                        after = paragraphProperties?.firstChild("spacing")?.attribute("after")?.toIntOrNull(),
+                        line = paragraphProperties?.firstChild("spacing")?.attribute("line")?.toIntOrNull()
+                    ),
+                    outlineLevel = headingLevel?.minus(1),
+                    isHeading = headingLevel != null,
+                    headingLevel = headingLevel
+                )
+            }
+            .toMap()
+    }
+
+    private fun resolveParagraphStyle(
+        paragraph: Element,
+        styles: Map<String, ParagraphStyle>
+    ): ParagraphStyle {
+        val properties = paragraph.firstChild("pPr")
+        val styleId = properties?.firstChild("pStyle")?.attribute("val")
+        val baseStyle = styles[styleId] ?: ParagraphStyle(styleId = styleId)
+        val directAlignment = parseAlignment(properties?.firstChild("jc")?.attribute("val"))
+        val directHeadingLevel = properties?.firstChild("outlineLvl")?.attribute("val")?.toIntOrNull()?.plus(1)
+
+        return baseStyle.copy(
+            alignment = if (directAlignment != ParagraphAlignment.START || baseStyle.alignment == ParagraphAlignment.START) {
+                directAlignment
+            } else {
+                baseStyle.alignment
+            },
+            headingLevel = directHeadingLevel ?: baseStyle.headingLevel,
+            isHeading = directHeadingLevel != null || baseStyle.isHeading
+        )
+    }
+
+    private fun extractHeadingLevel(styleId: String?, styleName: String?): Int? {
+        val probe = listOfNotNull(styleId, styleName)
+            .joinToString(" ")
+            .lowercase()
+        val match = Regex("heading\\s*([1-9])").find(probe) ?: return null
+        return match.groupValues[1].toIntOrNull()
+    }
+
+    private fun parseAlignment(value: String?): ParagraphAlignment =
+        when (value?.lowercase()) {
+            "right", "end" -> ParagraphAlignment.END
+            "center" -> ParagraphAlignment.CENTER
+            "both", "justify" -> ParagraphAlignment.JUSTIFIED
+            "distribute" -> ParagraphAlignment.DISTRIBUTED
+            else -> ParagraphAlignment.START
+        }
+
+    private fun writeZipEntry(zip: ZipOutputStream, path: String, content: String) {
+        zip.putNextEntry(ZipEntry(path))
+        zip.write(content.toByteArray(Charsets.UTF_8))
+        zip.closeEntry()
+    }
+
+    private fun buildContentTypesXml(): String = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+          <Default Extension="xml" ContentType="application/xml"/>
+          <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+          <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+        </Types>
+    """.trimIndent()
+
+    private fun buildRootRelationshipsXml(): String = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+        </Relationships>
+    """.trimIndent()
+
+    private fun buildDocumentRelationshipsXml(): String = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+        </Relationships>
+    """.trimIndent()
+
+    private fun buildStylesXml(): String = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+            <w:name w:val="Normal"/>
+          </w:style>
+          <w:style w:type="paragraph" w:styleId="Heading1">
+            <w:name w:val="heading 1"/>
+            <w:pPr><w:outlineLvl w:val="0"/></w:pPr>
+          </w:style>
+          <w:style w:type="paragraph" w:styleId="Heading2">
+            <w:name w:val="heading 2"/>
+            <w:pPr><w:outlineLvl w:val="1"/></w:pPr>
+          </w:style>
+          <w:style w:type="paragraph" w:styleId="Heading3">
+            <w:name w:val="heading 3"/>
+            <w:pPr><w:outlineLvl w:val="2"/></w:pPr>
+          </w:style>
+        </w:styles>
+    """.trimIndent()
+
+    private fun buildDocumentXml(content: List<DocumentElement>): String {
+        val body = buildString {
+            content.forEach { element ->
+                append(renderElement(element))
+            }
+            append("<w:sectPr/>")
+        }
+
+        return """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document
+                xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+              <w:body>$body</w:body>
+            </w:document>
+        """.trimIndent()
+    }
+
+    private fun renderElement(element: DocumentElement): String =
+        when (element) {
+            is DocumentElement.Paragraph -> renderParagraph(element)
+            is DocumentElement.SectionHeader -> renderHeader(element)
+            is DocumentElement.Table -> renderTable(element)
+            is DocumentElement.Image -> renderPlainParagraph(element.caption ?: element.altText ?: "[Image]")
+            is DocumentElement.PageBreak -> "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>"
+            is DocumentElement.Section -> renderPlainParagraph(element.properties.toString())
+            is DocumentElement.HeaderFooter -> renderPlainParagraph(element.content.text)
+            is DocumentElement.Note -> renderPlainParagraph(element.info.text)
+            is DocumentElement.Comment -> renderPlainParagraph(element.info.text)
+            is DocumentElement.Bookmark -> renderPlainParagraph(element.info.name)
+            is DocumentElement.Field -> renderPlainParagraph(element.info.instruction)
+            is DocumentElement.Metadata -> renderPlainParagraph("${element.info.title ?: element.info.kind}: ${element.info.summary}")
+            is DocumentElement.Drawing -> renderPlainParagraph(element.info.kind)
+            is DocumentElement.EmbeddedObject -> renderPlainParagraph(element.info.description ?: element.info.kind)
+        }
+
+    private fun renderParagraph(paragraph: DocumentElement.Paragraph): String {
+        val paragraphProperties = buildString {
+            paragraph.style.headingLevel?.let { level ->
+                append("<w:pStyle w:val=\"Heading${level.coerceIn(1, 3)}\"/>")
+            }
+        }
+        val runs = paragraph.spans.joinToString("") { span ->
+            val runProperties = buildString {
+                if (span.isBold) append("<w:b/>")
+                if (span.isItalic) append("<w:i/>")
+                if (span.isUnderline) append("<w:u w:val=\"single\"/>")
+                if (span.isStrikethrough) append("<w:strike/>")
+                span.color.takeIf { it.isNotBlank() }?.let { append("<w:color w:val=\"${escapeXml(it.removePrefix("#"))}\"/>") }
+                span.fontSize?.let { append("<w:sz w:val=\"${it * 2}\"/>") }
+            }
+            val preserved = if (span.text.startsWith(" ") || span.text.endsWith(" ")) " xml:space=\"preserve\"" else ""
+            "<w:r>${if (runProperties.isNotBlank()) "<w:rPr>$runProperties</w:rPr>" else ""}<w:t$preserved>${escapeXml(span.text)}</w:t></w:r>"
+        }
+        return "<w:p>${if (paragraphProperties.isNotBlank()) "<w:pPr>$paragraphProperties</w:pPr>" else ""}$runs</w:p>"
+    }
+
+    private fun renderHeader(header: DocumentElement.SectionHeader): String =
+        "<w:p><w:pPr><w:pStyle w:val=\"Heading${header.level.coerceIn(1, 3)}\"/></w:pPr><w:r><w:t>${escapeXml(header.text)}</w:t></w:r></w:p>"
+
+    private fun renderTable(table: DocumentElement.Table): String {
+        val rows = table.rows.joinToString("") { row ->
+            "<w:tr>${row.joinToString("") { cell ->
+                "<w:tc><w:p><w:r><w:t>${escapeXml(cell)}</w:t></w:r></w:p></w:tc>"
+            }}</w:tr>"
+        }
+        return "<w:tbl>$rows</w:tbl>"
+    }
+
+    private fun renderPlainParagraph(text: String): String =
+        "<w:p><w:r><w:t>${escapeXml(text)}</w:t></w:r></w:p>"
+
+    private fun escapeXml(value: String): String = buildString {
+        value.forEach { char ->
+            append(
+                when (char) {
+                    '&' -> "&amp;"
+                    '<' -> "&lt;"
+                    '>' -> "&gt;"
+                    '"' -> "&quot;"
+                    '\'' -> "&apos;"
+                    else -> char
+                }
+            )
         }
     }
 
-    private fun appendParagraphElements(
-        elements: MutableList<DocumentElement>,
-        poiParagraph: XWPFParagraph
-    ) {
-        val parsedParagraph = paragraphParser.parse(poiParagraph)
-        val text = parsedParagraph.spans.joinToString(separator = "") { it.text }.trim()
-        if (text.isEmpty() && parsedParagraph.listLabel == null) {
-            return
-        }
-
-        parsedParagraph.style.headingLevel?.let { level ->
-            if (text.isNotEmpty()) {
-                elements.add(DocumentElement.SectionHeader(text = text, level = level))
-                return
-            }
-        }
-
-        elements.add(parsedParagraph)
-    }
-
-    private fun applyParagraphStyle(
-        poiParagraph: XWPFParagraph,
-        paragraph: DocumentElement.Paragraph
-    ) {
-        val style = paragraph.style
-        style.styleId?.takeIf { it.isNotBlank() }?.let { poiParagraph.style = it }
-        poiParagraph.alignment = when (style.alignment) {
-            com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment.END -> {
-                PoiParagraphAlignment.RIGHT
-            }
-            com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment.CENTER -> {
-                PoiParagraphAlignment.CENTER
-            }
-            com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment.JUSTIFIED -> {
-                PoiParagraphAlignment.BOTH
-            }
-            com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment.DISTRIBUTED -> {
-                PoiParagraphAlignment.DISTRIBUTE
-            }
-            else -> PoiParagraphAlignment.LEFT
-        }
-        style.indentation.left?.let { poiParagraph.indentationLeft = it }
-        style.indentation.right?.let { poiParagraph.indentationRight = it }
-        style.indentation.firstLine?.let { poiParagraph.indentationFirstLine = it }
-        style.indentation.hanging?.let { poiParagraph.indentationHanging = it }
-        style.spacing.before?.let { poiParagraph.spacingBefore = it }
-        style.spacing.after?.let { poiParagraph.spacingAfter = it }
-        style.spacing.line?.let { poiParagraph.spacingBetween = it / 240.0 }
-    }
+    private data class RunContent(
+        val spans: List<TextSpan>,
+        val image: Element? = null,
+        val pageBreak: Boolean = false
+    )
 }

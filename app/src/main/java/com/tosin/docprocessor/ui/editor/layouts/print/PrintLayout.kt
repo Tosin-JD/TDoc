@@ -30,6 +30,8 @@ import com.tosin.docprocessor.ui.editor.EditorViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+private const val PRINT_PREVIEW_SCALE = 0.82f
+
 @Composable
 fun PrintLayout(
     viewModel: EditorViewModel,
@@ -84,7 +86,7 @@ fun PrintLayout(
                     unitConverter = unitConverter,
                     viewModel = viewModel,
                     isEditable = isEditable,
-                    scale = 1f
+                    scale = PRINT_PREVIEW_SCALE
                 )
             }
         }

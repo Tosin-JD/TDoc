@@ -37,7 +37,7 @@ class OdtImageParser(
         val altText = element.getElementsByTagNameNS(svgNs, "desc").item(0)?.textContent?.trim()
 
         return DocumentElement.Image(
-            sourceUri = cacheFile.toURI().toString(),
+            sourceUri = cacheFile.absolutePath,
             altText = altText,
             caption = null
         )

@@ -13,7 +13,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import org.apache.poi.xwpf.usermodel.XWPFDocument
 import java.io.File
 import javax.inject.Inject
 
@@ -37,7 +36,7 @@ class DocumentRepositoryImpl @Inject constructor(
         val mimeType = context.contentResolver.getType(uri)
             ?: MimeTypes.fromExtension(fileName.substringAfterLast('.', ""))
             ?: ""
-        context.contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
+        context.contentResolver.openOutputStream(uri, "w")?.use { outputStream ->
             val parser = parserFactory.createParser(mimeType)
             if (parser != null) {
                 parser.save(outputStream, content).getOrThrow()
@@ -97,11 +96,18 @@ class DocumentRepositoryImpl @Inject constructor(
         }
 
     override suspend fun createNewDocument(uri: Uri) {
+        val fileName = getFileName(uri)
+        val mimeType = context.contentResolver.getType(uri)
+            ?: MimeTypes.fromExtension(fileName.substringAfterLast('.', ""))
+            ?: ""
         context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-            // Create a blank Word document structure
-            val doc = XWPFDocument()
-            doc.write(outputStream)
-        }
+            val parser = parserFactory.createParser(mimeType)
+            if (parser != null) {
+                parser.save(outputStream, emptyList()).getOrThrow()
+            } else {
+                outputStream.bufferedWriter().use { it.write("") }
+            }
+        } ?: throw IllegalStateException("Could not open output stream for URI: $uri")
     }
 
     private suspend fun parseStream(

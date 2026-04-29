@@ -19,7 +19,9 @@ class PrintPaginator(
     private val registry: LayoutRegistry,
     private val flowController: FlowController
 ) : Paginator {
-    private val tableCellPaddingPt = 6f
+    private val tableCellPaddingPt = 4f
+    private val minTableColumnWidthPt = 48f
+    private val maxTableColumnWeight = 8f
 
     private data class PaginationState(
         var currentPageIndex: Int = 0,
@@ -410,15 +412,16 @@ class PrintPaginator(
         widthPt: Float
     ): TableRenderLayout {
         val columnCount = element.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
-        val cellWidthPt = widthPt / columnCount
-        val contentWidthPt = (cellWidthPt - (tableCellPaddingPt * 2f)).coerceAtLeast(12f)
+        val columnWidthsPt = calculateColumnWidths(element.rows, widthPt, columnCount)
 
         val rowLayouts = element.rows.ifEmpty { listOf(emptyList()) }.mapIndexed { rowIndex, row ->
             val cells = List(columnCount) { columnIndex ->
                 val text = row.getOrNull(columnIndex).orEmpty()
+                val cellWidthPt = columnWidthsPt[columnIndex]
+                val contentWidthPt = (cellWidthPt - (tableCellPaddingPt * 2f)).coerceAtLeast(20f)
                 val layout = textMeasurer.buildPlainTextLayout(
                     text = text.ifEmpty { " " },
-                    fontSize = 10f,
+                    fontSize = 9f,
                     isBold = element.hasHeader && rowIndex == 0,
                     widthPt = contentWidthPt
                 )
@@ -444,6 +447,49 @@ class PrintPaginator(
             rowLayouts = rowLayouts,
             cellPaddingPt = tableCellPaddingPt
         )
+    }
+
+    private fun calculateColumnWidths(
+        rows: List<List<String>>,
+        totalWidthPt: Float,
+        columnCount: Int
+    ): List<Float> {
+        if (columnCount == 1) return listOf(totalWidthPt)
+
+        val rawWeights = MutableList(columnCount) { 1f }
+        rows.forEach { row ->
+            repeat(columnCount) { columnIndex ->
+                val text = row.getOrNull(columnIndex).orEmpty()
+                val estimatedWeight = estimateColumnWeight(text)
+                rawWeights[columnIndex] = maxOf(rawWeights[columnIndex], estimatedWeight)
+            }
+        }
+
+        val totalWeight = rawWeights.sum().takeIf { it > 0f } ?: columnCount.toFloat()
+        val initialWidths = rawWeights.map { weight ->
+            maxOf(minTableColumnWidthPt, totalWidthPt * (weight / totalWeight))
+        }.toMutableList()
+
+        val widthSum = initialWidths.sum()
+        if (widthSum == totalWidthPt) return initialWidths
+
+        val scale = totalWidthPt / widthSum
+        val normalized = initialWidths.map { it * scale }.toMutableList()
+        val normalizedSum = normalized.sum()
+        if (normalized.isNotEmpty()) {
+            normalized[normalized.lastIndex] += totalWidthPt - normalizedSum
+        }
+        return normalized
+    }
+
+    private fun estimateColumnWeight(text: String): Float {
+        val longestSegment = text
+            .lineSequence()
+            .map { it.trim().length }
+            .maxOrNull()
+            ?.coerceAtLeast(1)
+            ?: 1
+        return (longestSegment / 8f).coerceIn(1f, maxTableColumnWeight)
     }
 
     private fun createPage(
