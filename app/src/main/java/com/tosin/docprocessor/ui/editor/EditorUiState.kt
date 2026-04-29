@@ -7,8 +7,10 @@ import com.tosin.docprocessor.data.common.model.ViewMode
 data class EditorUiState(
     val documentData: DocumentData? = null,
     val viewMode: ViewMode = ViewMode.MOBILE,
-    val editorMode: EditorMode = EditorMode.EDIT,
+    val editorMode: EditorMode = EditorMode.PREVIEW,
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
+    val isStarred: Boolean = false,
+    val isSuggestChangesEnabled: Boolean = false,
     val errorMessage: String? = null
 )

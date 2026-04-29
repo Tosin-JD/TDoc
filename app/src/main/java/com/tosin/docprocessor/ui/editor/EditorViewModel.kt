@@ -64,6 +64,26 @@ class EditorViewModel @Inject constructor(
         )
     }
 
+    fun toggleStarred() {
+        _uiState.value = _uiState.value.copy(isStarred = !_uiState.value.isStarred)
+    }
+
+    fun toggleSuggestChanges() {
+        _uiState.value = _uiState.value.copy(isSuggestChangesEnabled = !_uiState.value.isSuggestChangesEnabled)
+    }
+
+    fun updateSearchQuery(query: String) {
+        // Implement search logic if needed
+    }
+
+    fun undo() {
+        // TODO: Implement undo logic
+    }
+
+    fun redo() {
+        // TODO: Implement redo logic
+    }
+
     fun onFilePicked(uri: Uri?) {
         uri?.let {
             currentUri = it

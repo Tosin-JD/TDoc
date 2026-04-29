@@ -1,46 +1,62 @@
 package com.tosin.docprocessor.ui.editor
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Comment
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.SaveAs
-import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.automirrored.filled.NoteAdd
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tosin.docprocessor.data.common.model.EditorMode
-import com.tosin.docprocessor.data.common.model.MimeTypes
 import com.tosin.docprocessor.data.common.model.ViewMode
-import com.tosin.docprocessor.ui.components.FormattingToolbar
+import com.tosin.docprocessor.ui.components.EditorMoreMenu
+import com.tosin.docprocessor.ui.components.EditorToolbar
 import com.tosin.docprocessor.ui.editor.layouts.MobileLayout
 import com.tosin.docprocessor.ui.editor.layouts.print.PrintLayout
 
@@ -54,6 +70,9 @@ fun EditorScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val focusRequester = remember { FocusRequester() }
     val uiState by viewModel.uiState.collectAsState()
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var showFontSheet by remember { mutableStateOf(false) }
+    val fontSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { message ->
@@ -65,90 +84,101 @@ fun EditorScreen(
         openDocumentUri?.let { viewModel.onFilePicked(it) }
     }
 
-    LaunchedEffect(viewModel.documentElements.isNotEmpty()) {
-        if (viewModel.documentElements.isNotEmpty()) {
+    LaunchedEffect(viewModel.documentElements.isNotEmpty(), uiState.editorMode) {
+        if (viewModel.documentElements.isNotEmpty() && uiState.editorMode == EditorMode.EDIT) {
             runCatching { focusRequester.requestFocus() }
         }
     }
 
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-        onResult = { uri -> viewModel.onFilePicked(uri) }
-    )
-
-    val createDocLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument(MimeTypes.DOCX),
-        onResult = { uri -> viewModel.onFileCreated(uri) }
-    )
-
-    val saveAsLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument(MimeTypes.DOCX),
-        onResult = { uri -> viewModel.onSaveAs(uri) }
-    )
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
-                title = { Text("TDoc") },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        viewModel.closeDocument()
-                        onCloseRequest()
-                    }) {
-                        Icon(Icons.Default.Close, contentDescription = "Close document")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        viewModel.setViewMode(
-                            if (uiState.viewMode == ViewMode.MOBILE) ViewMode.PRINT else ViewMode.MOBILE
+            if (uiState.editorMode == EditorMode.PREVIEW) {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = uiState.documentData?.filename ?: "Untitled",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium
                         )
-                    }) {
-                        Icon(
-                            imageVector = if (uiState.viewMode == ViewMode.MOBILE) {
-                                Icons.Default.Description
-                            } else {
-                                Icons.Default.Smartphone
-                            },
-                            contentDescription = "Switch View"
-                        )
-                    }
-                    IconButton(onClick = { viewModel.toggleEditorMode() }) {
-                        Icon(
-                            imageVector = if (uiState.editorMode == EditorMode.EDIT) {
-                                Icons.Default.Visibility
-                            } else {
-                                Icons.Default.Edit
-                            },
-                            contentDescription = "Toggle Editor Mode"
-                        )
-                    }
-                    IconButton(onClick = { createDocLauncher.launch("Untitled.docx") }) {
-                        Icon(imageVector = Icons.AutoMirrored.Filled.NoteAdd, contentDescription = "Create New File")
-                    }
-                    IconButton(onClick = {
-                        filePickerLauncher.launch(
-                            arrayOf(
-                                MimeTypes.DOCX,
-                                MimeTypes.ODT,
-                                "text/plain"
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            viewModel.closeDocument()
+                            onCloseRequest()
+                        }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { /* TODO */ }) {
+                            Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Comments")
+                        }
+                        Box {
+                            IconButton(onClick = { showMoreMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                            }
+                            EditorMoreMenu(
+                                expanded = showMoreMenu,
+                                onDismissRequest = { showMoreMenu = false },
+                                uiState = uiState,
+                                onViewModeChange = viewModel::setViewMode,
+                                onToggleSuggestChanges = viewModel::toggleSuggestChanges,
+                                onToggleStarred = viewModel::toggleStarred
                             )
-                        )
-                    }) {
-                        Icon(imageVector = Icons.Default.FileOpen, contentDescription = "Open File")
+                        }
                     }
-                    IconButton(onClick = { saveAsLauncher.launch("CopyOfDoc.docx") }) {
-                        Icon(imageVector = Icons.Default.SaveAs, contentDescription = "Save As")
+                )
+            } else {
+                TopAppBar(
+                    title = { /* Empty title in edit mode or as needed */ },
+                    navigationIcon = {
+                        IconButton(onClick = { viewModel.toggleEditorMode() }) {
+                            Icon(Icons.Default.Check, contentDescription = "Finish Editing", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.undo() }) {
+                            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                        }
+                        IconButton(onClick = { viewModel.redo() }) {
+                            Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                        }
+                        IconButton(onClick = { /* TODO: Add element */ }) {
+                            Icon(Icons.Default.Add, contentDescription = "Add")
+                        }
+                        IconButton(onClick = { /* TODO */ }) {
+                            Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Comments")
+                        }
+                        Box {
+                            IconButton(onClick = { showMoreMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                            }
+                            EditorMoreMenu(
+                                expanded = showMoreMenu,
+                                onDismissRequest = { showMoreMenu = false },
+                                uiState = uiState,
+                                onViewModeChange = viewModel::setViewMode,
+                                onToggleSuggestChanges = viewModel::toggleSuggestChanges,
+                                onToggleStarred = viewModel::toggleStarred
+                            )
+                        }
                     }
-                    IconButton(
-                        onClick = { viewModel.saveCurrentFile() },
-                        enabled = !viewModel.isSaving
-                    ) {
-                        Icon(imageVector = Icons.Default.Save, contentDescription = "Save File")
-                    }
+                )
+            }
+        },
+        floatingActionButton = {
+            if (uiState.editorMode == EditorMode.PREVIEW) {
+                FloatingActionButton(
+                    onClick = { viewModel.toggleEditorMode() },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit document")
                 }
-            )
+            }
         },
         modifier = Modifier.fillMaxSize()
     ) { innerPadding ->
@@ -186,11 +216,67 @@ fun EditorScreen(
             }
 
             if (uiState.editorMode == EditorMode.EDIT) {
-                FormattingToolbar(
+                EditorToolbar(
                     onBoldClick = { /* TODO */ },
                     onItalicClick = { /* TODO */ },
+                    onUnderlineClick = { /* TODO */ },
+                    onAlignmentClick = { /* TODO */ },
+                    onFontFeaturesClick = { showFontSheet = true },
                     modifier = Modifier.imePadding()
                 )
+            }
+        }
+    }
+
+    if (showFontSheet) {
+        FontFeaturesSheet(
+            sheetState = fontSheetState,
+            onDismiss = { showFontSheet = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FontFeaturesSheet(
+    sheetState: androidx.compose.material3.SheetState,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        dragHandle = null
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(WindowInsets.ime.asPaddingValues())
+                .navigationBarsPadding()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Format",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
+                }
+            }
+            HorizontalDivider()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Formatting tools will be here")
             }
         }
     }

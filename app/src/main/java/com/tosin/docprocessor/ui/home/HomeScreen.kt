@@ -2,6 +2,8 @@ package com.tosin.docprocessor.ui.home
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.text.format.DateFormat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -31,9 +33,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
@@ -55,6 +59,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -103,6 +108,20 @@ fun HomeScreen(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val sortSheetState = rememberModalBottomSheetState()
 
+    val createDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        onResult = { uri: Uri? -> 
+            uri?.let { onOpenDocument(it) }
+        }
+    )
+
+    val openDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri: Uri? -> 
+            uri?.let { onOpenDocument(it) }
+        }
+    )
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -134,7 +153,36 @@ fun HomeScreen(
     ) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surface,
+            floatingActionButton = {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    FloatingActionButton(
+                        onClick = { 
+                            openDocLauncher.launch(
+                                arrayOf(
+                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    "application/vnd.oasis.opendocument.text",
+                                    "text/plain"
+                                )
+                            )
+                        },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
+                        Icon(Icons.Default.FileOpen, contentDescription = "Open file")
+                    }
+                    FloatingActionButton(
+                        onClick = { createDocLauncher.launch("Untitled.docx") },
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Create new document")
+                    }
+                }
+            }
         ) { innerPadding ->
             Column(
                 modifier = Modifier
