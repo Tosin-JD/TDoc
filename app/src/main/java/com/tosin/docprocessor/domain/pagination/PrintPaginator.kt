@@ -180,7 +180,12 @@ class PrintPaginator(
                     Pair(null, element)
                 } else {
                     // Adjust for Widow/Orphan rules
-                    val lineCount = text.split("\n").size
+                    val fullLayout = textMeasurer.buildParagraphLayout(
+                        spans = element.spans,
+                        style = element.style,
+                        widthPt = widthPt
+                    ) ?: return Pair(element, null)
+                    val lineCount = fullLayout.lineCount
                     val adjustedLine = flowController.adjustSplitPointForRules(lineCount, lastFittingLine)
 
                     if (adjustedLine < 0) {
@@ -189,14 +194,7 @@ class PrintPaginator(
                     } else {
                         // Create text fragments at line boundary
                         val charAtLineEnd = textMeasurer.getLineEnd(
-                            // Build layout to get line info
-                            android.text.StaticLayout.Builder.obtain(
-                                text, 0, text.length,
-                                android.text.TextPaint().apply {
-                                    textSize = unitConverter.ptToPx(element.spans[0].fontSize?.toFloat() ?: 12f)
-                                },
-                                unitConverter.ptToPx(widthPt).toInt()
-                            ).build(),
+                            fullLayout,
                             adjustedLine
                         )
 
@@ -322,10 +320,98 @@ class PrintPaginator(
             element = element,
             pageIndex = pageIndex,
             bounds = bounds,
-            metadata = mapOf("originalHeight" to elementHeight)
+            metadata = mapOf("originalHeight" to elementHeight),
+            layoutResult = createLayoutResult(element, dimensions.printableWidth)
         )
 
         pageElements.add(positioned)
+    }
+
+    private fun createLayoutResult(
+        element: DocumentElement,
+        widthPt: Float
+    ): Any? {
+        return when (element) {
+            is DocumentElement.Paragraph -> {
+                textMeasurer.buildParagraphLayout(element.spans, element.style, widthPt)
+            }
+            is DocumentElement.SectionHeader -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = element.text,
+                    fontSize = (12 + (4 - element.level)).toFloat(),
+                    isBold = true,
+                    widthPt = widthPt
+                )
+            }
+            is DocumentElement.Section -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = element.properties.toString(),
+                    fontSize = 11f,
+                    widthPt = widthPt
+                )
+            }
+            is DocumentElement.HeaderFooter -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = "${element.content.kind.name.lowercase()} (${element.content.variant}): ${element.content.text}",
+                    fontSize = 10f,
+                    widthPt = widthPt
+                )
+            }
+            is DocumentElement.Note -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = "${element.info.kind.name.lowercase()}: ${element.info.text}",
+                    fontSize = 10f,
+                    widthPt = widthPt
+                )
+            }
+            is DocumentElement.Comment -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = "comment by ${element.info.author ?: "unknown"}: ${element.info.text}",
+                    fontSize = 10f,
+                    widthPt = widthPt
+                )
+            }
+            is DocumentElement.Bookmark -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = "bookmark ${element.info.boundary.name.lowercase()}: ${element.info.name.ifBlank { element.info.id }}",
+                    fontSize = 10f,
+                    widthPt = widthPt
+                )
+            }
+            is DocumentElement.Field -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = "field ${element.info.type}: ${element.info.instruction}",
+                    fontSize = 10f,
+                    widthPt = widthPt
+                )
+            }
+            is DocumentElement.Metadata -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = buildString {
+                        append(element.info.title ?: element.info.kind)
+                        append(": ")
+                        append(element.info.summary)
+                    },
+                    fontSize = 10f,
+                    widthPt = widthPt
+                )
+            }
+            is DocumentElement.Drawing -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = "drawing: ${element.info.kind}",
+                    fontSize = 10f,
+                    widthPt = widthPt
+                )
+            }
+            is DocumentElement.EmbeddedObject -> {
+                textMeasurer.buildPlainTextLayout(
+                    text = "embedded object: ${element.info.programId ?: element.info.kind}",
+                    fontSize = 10f,
+                    widthPt = widthPt
+                )
+            }
+            else -> null
+        }
     }
 
     /**

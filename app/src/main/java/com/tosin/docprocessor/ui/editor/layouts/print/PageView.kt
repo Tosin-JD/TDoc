@@ -1,47 +1,60 @@
 package com.tosin.docprocessor.ui.editor.layouts.print
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import com.tosin.docprocessor.data.common.model.layout.PageModel
 import com.tosin.docprocessor.core.rendering.PrintElementRenderer
+import com.tosin.docprocessor.data.common.model.layout.PageModel
+import com.tosin.docprocessor.domain.pagination.UnitConverter
 
 @Composable
 fun PageView(
     pageModel: PageModel,
     renderer: PrintElementRenderer,
+    unitConverter: UnitConverter,
     modifier: Modifier = Modifier,
-    scale: Float = 1.0f
+    scale: Float = 1f
 ) {
-    val widthDp = (pageModel.dimensions.width * scale).dp
-    val heightDp = (pageModel.dimensions.height * scale).dp
-
-    Card(
-        modifier = modifier
-            .padding(16.dp)
-            .size(widthDp, heightDp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                drawIntoCanvas { canvas ->
-                    pageModel.elements.forEach { positionedElement ->
-                        renderer.render(canvas.nativeCanvas, positionedElement, scale)
+    val density = LocalDensity.current
+    val pageWidthDp = with(density) { (unitConverter.ptToPx(pageModel.dimensions.width) * scale).toDp() }
+    val pageHeightDp = with(density) { (unitConverter.ptToPx(pageModel.dimensions.height) * scale).toDp() }
+    val renderBlock = remember(pageModel, renderer, scale) {
+        { drawScope: androidx.compose.ui.graphics.drawscope.DrawScope ->
+            with(renderer) {
+                with(drawScope) {
+                    if (scale != 1f) {
+                        withTransform({
+                            scale(scaleX = scale, scaleY = scale, pivot = androidx.compose.ui.geometry.Offset.Zero)
+                        }) {
+                            pageModel.elements.forEach { render(it) }
+                        }
+                    } else {
+                        pageModel.elements.forEach { render(it) }
                     }
                 }
             }
+        }
+    }
+
+    Card(
+        modifier = modifier
+            .padding(horizontal = 24.dp, vertical = 12.dp)
+            .size(pageWidthDp, pageHeightDp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            renderBlock(this)
         }
     }
 }

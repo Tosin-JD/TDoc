@@ -12,5 +12,6 @@ data class PositionedElement(
     val element: DocumentElement, // The actual content snapshot
     val pageIndex: Int,          // Which page it belongs to
     val bounds: RectF,           // X, Y, Width, Height in Points relative to Page (0,0)
-    val metadata: Map<String, Any> = emptyMap() // For things like "Split across pages" (lineStart, lineEnd)
+    val metadata: Map<String, Any> = emptyMap(), // For things like "Split across pages" (lineStart, lineEnd)
+    val layoutResult: Any? = null
 )
