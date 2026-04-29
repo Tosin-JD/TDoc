@@ -1,4 +1,4 @@
-package com.tosin.docprocessor.ui.editor.renderer
+package com.tosin.docprocessor.core.rendering
 
 import android.graphics.Canvas
 import android.graphics.Color
