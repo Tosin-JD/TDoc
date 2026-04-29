@@ -22,7 +22,7 @@ import com.tosin.docprocessor.domain.pagination.PrintPaginator
 import com.tosin.docprocessor.domain.pagination.TextMeasurer
 import com.tosin.docprocessor.domain.pagination.UnitConverter
 import com.tosin.docprocessor.ui.editor.EditorViewModel
-import com.tosin.docprocessor.ui.editor.renderer.PrintElementRenderer
+import com.tosin.docprocessor.core.rendering.PrintElementRenderer
 
 @Composable
 fun PrintLayout(

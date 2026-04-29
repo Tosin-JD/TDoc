@@ -15,7 +15,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.data.common.model.layout.PageModel
-import com.tosin.docprocessor.ui.editor.renderer.PrintElementRenderer
+import com.tosin.docprocessor.core.rendering.PrintElementRenderer
 
 @Composable
 fun PageView(
