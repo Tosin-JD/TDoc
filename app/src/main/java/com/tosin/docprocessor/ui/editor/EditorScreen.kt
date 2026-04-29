@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SaveAs
 import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,13 +29,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.tosin.docprocessor.data.common.model.EditorMode
 import com.tosin.docprocessor.data.common.model.MimeTypes
 import com.tosin.docprocessor.data.common.model.ViewMode
 import com.tosin.docprocessor.ui.components.FormattingToolbar
@@ -43,9 +45,9 @@ import com.tosin.docprocessor.ui.editor.layouts.print.PrintLayout
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
-    var viewMode by remember { mutableStateOf(ViewMode.MOBILE) }
     val snackbarHostState = remember { SnackbarHostState() }
     val focusRequester = remember { FocusRequester() }
+    val uiState by viewModel.uiState.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { message ->
@@ -81,11 +83,27 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                 title = { Text("TDoc") },
                 actions = {
                     IconButton(onClick = {
-                        viewMode = if (viewMode == ViewMode.MOBILE) ViewMode.PRINT else ViewMode.MOBILE
+                        viewModel.setViewMode(
+                            if (uiState.viewMode == ViewMode.MOBILE) ViewMode.PRINT else ViewMode.MOBILE
+                        )
                     }) {
                         Icon(
-                            imageVector = if (viewMode == ViewMode.MOBILE) Icons.Default.Description else Icons.Default.Smartphone,
+                            imageVector = if (uiState.viewMode == ViewMode.MOBILE) {
+                                Icons.Default.Description
+                            } else {
+                                Icons.Default.Smartphone
+                            },
                             contentDescription = "Switch View"
+                        )
+                    }
+                    IconButton(onClick = { viewModel.toggleEditorMode() }) {
+                        Icon(
+                            imageVector = if (uiState.editorMode == EditorMode.EDIT) {
+                                Icons.Default.Visibility
+                            } else {
+                                Icons.Default.Edit
+                            },
+                            contentDescription = "Toggle Editor Mode"
                         )
                     }
                     IconButton(onClick = { createDocLauncher.launch("Untitled.docx") }) {
@@ -126,12 +144,20 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                when (viewMode) {
-                    ViewMode.MOBILE -> MobileLayout(viewModel, focusRequester)
-                    ViewMode.PRINT -> PrintLayout(viewModel, focusRequester)
+                when (uiState.viewMode) {
+                    ViewMode.MOBILE -> MobileLayout(
+                        viewModel = viewModel,
+                        focusRequester = focusRequester,
+                        isEditable = uiState.editorMode == EditorMode.EDIT
+                    )
+                    ViewMode.PRINT -> PrintLayout(
+                        viewModel = viewModel,
+                        focusRequester = focusRequester,
+                        isEditable = uiState.editorMode == EditorMode.EDIT
+                    )
                 }
 
-                if (viewModel.isLoading || viewModel.isSaving) {
+                if (uiState.isLoading || uiState.isSaving) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -141,11 +167,13 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
                 }
             }
 
-            FormattingToolbar(
-                onBoldClick = { /* TODO */ },
-                onItalicClick = { /* TODO */ },
-                modifier = Modifier.imePadding()
-            )
+            if (uiState.editorMode == EditorMode.EDIT) {
+                FormattingToolbar(
+                    onBoldClick = { /* TODO */ },
+                    onItalicClick = { /* TODO */ },
+                    modifier = Modifier.imePadding()
+                )
+            }
         }
     }
 }

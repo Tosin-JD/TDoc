@@ -16,7 +16,8 @@ import com.tosin.docprocessor.ui.editor.renderer.DocumentElementRenderer
 @Composable
 fun MobileLayout(
     viewModel: EditorViewModel,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    isEditable: Boolean
 ) {
     LazyColumn(
         modifier = Modifier
@@ -25,7 +26,12 @@ fun MobileLayout(
             .focusRequester(focusRequester)
     ) {
         itemsIndexed(viewModel.documentElements) { index, element ->
-            DocumentElementRenderer(element, index, viewModel)
+            DocumentElementRenderer(
+                element = element,
+                index = index,
+                viewModel = viewModel,
+                isEditable = isEditable
+            )
         }
     }
 }

@@ -34,32 +34,47 @@ import com.tosin.docprocessor.ui.editor.EditorViewModel
 import java.io.File
 
 @Composable
-fun DocumentElementRenderer(element: DocumentElement, index: Int, viewModel: EditorViewModel) {
+fun DocumentElementRenderer(
+    element: DocumentElement,
+    index: Int,
+    viewModel: EditorViewModel,
+    isEditable: Boolean
+) {
     when (element) {
         is DocumentElement.Paragraph -> {
             val paragraphText = remember(element.spans, element.listLabel, element.style) {
                 element.toAnnotatedString()
             }
-            TextField(
-                value = androidx.compose.ui.text.input.TextFieldValue(paragraphText),
-                onValueChange = { viewModel.updateParagraph(index, it.annotatedString) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = if (MaterialTheme.colorScheme.surface == Color.White) {
-                        Color.Black
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    }
-                ),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
+            if (isEditable) {
+                TextField(
+                    value = androidx.compose.ui.text.input.TextFieldValue(paragraphText),
+                    onValueChange = { viewModel.updateParagraph(index, it.annotatedString) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = if (MaterialTheme.colorScheme.surface == Color.White) {
+                            Color.Black
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        }
+                    ),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    )
                 )
-            )
+            } else {
+                Text(
+                    text = paragraphText,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                )
+            }
         }
 
         is DocumentElement.Table -> {
@@ -92,15 +107,33 @@ fun DocumentElementRenderer(element: DocumentElement, index: Int, viewModel: Edi
         }
 
         is DocumentElement.SectionHeader -> {
-            Text(
-                text = element.text,
-                style = when (element.level) {
-                    1 -> MaterialTheme.typography.headlineSmall
-                    2 -> MaterialTheme.typography.titleLarge
-                    else -> MaterialTheme.typography.titleMedium
-                },
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+            val textStyle = when (element.level) {
+                1 -> MaterialTheme.typography.headlineSmall
+                2 -> MaterialTheme.typography.titleLarge
+                else -> MaterialTheme.typography.titleMedium
+            }
+            if (isEditable) {
+                TextField(
+                    value = element.text,
+                    onValueChange = { viewModel.updateSectionHeader(index, it) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    textStyle = textStyle,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    )
+                )
+            } else {
+                Text(
+                    text = element.text,
+                    style = textStyle,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
         }
 
         is DocumentElement.Section -> MetadataText(element.properties.toString())

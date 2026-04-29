@@ -33,7 +33,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun PrintLayout(
     viewModel: EditorViewModel,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    isEditable: Boolean
 ) {
     val context = LocalContext.current
     val unitConverter = remember(context) { UnitConverter(context) }
@@ -81,6 +82,8 @@ fun PrintLayout(
                     pageModel = page,
                     renderer = renderer,
                     unitConverter = unitConverter,
+                    viewModel = viewModel,
+                    isEditable = isEditable,
                     scale = 1f
                 )
             }

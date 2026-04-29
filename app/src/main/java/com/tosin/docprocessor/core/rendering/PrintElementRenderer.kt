@@ -19,7 +19,10 @@ import java.io.File
 class PrintElementRenderer(
     private val unitConverter: UnitConverter
 ) {
-    fun DrawScope.render(positionedElement: PositionedElement) {
+    fun DrawScope.render(
+        positionedElement: PositionedElement,
+        renderTextContent: Boolean = true
+    ) {
         val bounds = positionedElement.bounds
         val x = unitConverter.ptToPx(bounds.left)
         val y = unitConverter.ptToPx(bounds.top)
@@ -29,7 +32,11 @@ class PrintElementRenderer(
         when (val element = positionedElement.element) {
             is DocumentElement.Image -> renderImage(element, x, y, width, height)
             is DocumentElement.Table -> renderTable(element, positionedElement.layoutResult, x, y, width, height)
-            else -> renderTextOrPlaceholder(positionedElement.layoutResult, x, y, width, height)
+            else -> {
+                if (renderTextContent) {
+                    renderTextOrPlaceholder(positionedElement.layoutResult, x, y, width, height)
+                }
+            }
         }
     }
 

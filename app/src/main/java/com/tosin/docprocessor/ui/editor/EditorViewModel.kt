@@ -9,6 +9,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tosin.docprocessor.data.common.model.DocumentData
 import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.data.common.model.EditorMode
+import com.tosin.docprocessor.data.common.model.ViewMode
 import com.tosin.docprocessor.data.local.dao.RecentFileDao
 import com.tosin.docprocessor.data.local.entities.RecentFile
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
@@ -34,13 +36,7 @@ class EditorViewModel @Inject constructor(
     var documentElements by mutableStateOf<List<DocumentElement>>(emptyList())
         private set
 
-    var isSaving by mutableStateOf(false)
-        private set
-
-    var isLoading by mutableStateOf(false)
-        private set
-
-    private val _uiState = MutableStateFlow<EditorUiState>(EditorUiState.Idle)
+    private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
 
     private val _currentDocument = MutableStateFlow<DocumentData?>(null)
@@ -51,12 +47,28 @@ class EditorViewModel @Inject constructor(
 
     private var currentUri: Uri? = null
 
+    val isSaving: Boolean
+        get() = _uiState.value.isSaving
+
+    val isLoading: Boolean
+        get() = _uiState.value.isLoading
+
+    fun setViewMode(viewMode: ViewMode) {
+        _uiState.value = _uiState.value.copy(viewMode = viewMode)
+    }
+
+    fun toggleEditorMode() {
+        val currentMode = _uiState.value.editorMode
+        _uiState.value = _uiState.value.copy(
+            editorMode = if (currentMode == EditorMode.EDIT) EditorMode.PREVIEW else EditorMode.EDIT
+        )
+    }
+
     fun onFilePicked(uri: Uri?) {
         uri?.let {
             currentUri = it
             viewModelScope.launch(Dispatchers.IO) {
-                isLoading = true
-                _uiState.value = EditorUiState.Loading
+                _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
                 try {
                     val elements = documentRepository.readDocumentFromUri(it)
                     val fileName = documentRepository.getFileName(it)
@@ -69,20 +81,22 @@ class EditorViewModel @Inject constructor(
                     withContext(Dispatchers.Main) {
                         documentElements = elements
                         _currentDocument.value = document
-                        _uiState.value = EditorUiState.Success(document)
+                        syncDocumentState(document)
                     }
                     _events.emit("Opened: $fileName")
                 } catch (e: Exception) {
-                    _uiState.value = EditorUiState.Error(e.message ?: "Failed to load file")
+                    _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "Failed to load file")
                     _events.emit("Failed to open file: ${e.localizedMessage}")
                 } finally {
-                    isLoading = false
+                    _uiState.value = _uiState.value.copy(isLoading = false)
                 }
             }
         }
     }
 
     fun updateParagraph(index: Int, newContent: AnnotatedString) {
+        if (_uiState.value.editorMode != EditorMode.EDIT) return
+
         val currentList = documentElements.toMutableList()
         if (index in currentList.indices) {
             val element = currentList[index]
@@ -96,7 +110,36 @@ class EditorViewModel @Inject constructor(
                     )
                 )
                 documentElements = currentList
+                syncDocumentState()
             }
+        }
+    }
+
+    fun updateSectionHeader(index: Int, newText: String) {
+        if (_uiState.value.editorMode != EditorMode.EDIT) return
+
+        val currentList = documentElements.toMutableList()
+        if (index in currentList.indices) {
+            val element = currentList[index]
+            if (element is DocumentElement.SectionHeader) {
+                currentList[index] = element.copy(text = newText)
+                documentElements = currentList
+                syncDocumentState()
+            }
+        }
+    }
+
+    fun updateParagraphById(elementId: String, newContent: AnnotatedString) {
+        val index = documentElements.indexOfFirst { it.id == elementId }
+        if (index >= 0) {
+            updateParagraph(index, newContent)
+        }
+    }
+
+    fun updateSectionHeaderById(elementId: String, newText: String) {
+        val index = documentElements.indexOfFirst { it.id == elementId }
+        if (index >= 0) {
+            updateSectionHeader(index, newText)
         }
     }
 
@@ -107,35 +150,36 @@ class EditorViewModel @Inject constructor(
         }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                isSaving = true
+                _uiState.value = _uiState.value.copy(isSaving = true)
                 documentRepository.saveDocumentToUri(uri, documentElements)
-                _currentDocument.value = _currentDocument.value?.copy(content = documentElements)
+                syncDocumentState()
                 _events.emit("File saved successfully!")
             } catch (e: Exception) {
                 _events.emit("Save failed: ${e.localizedMessage}")
             } finally {
-                isSaving = false
+                _uiState.value = _uiState.value.copy(isSaving = false)
             }
         }
     }
 
     fun loadDocument(filePath: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            _uiState.value = EditorUiState.Loading
-            isLoading = true
+            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
             documentRepository.loadDocument(filePath)
                 .catch { exception ->
-                    _uiState.value = EditorUiState.Error(exception.message ?: "Unknown error")
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        errorMessage = exception.message ?: "Unknown error"
+                    )
                     _events.emit("Load failed: ${exception.localizedMessage}")
-                    isLoading = false
                 }
                 .collect { document ->
                     withContext(Dispatchers.Main) {
                         documentElements = document.content
                     }
                     _currentDocument.value = document
-                    _uiState.value = EditorUiState.Success(document)
-                    isLoading = false
+                    syncDocumentState(document)
+                    _uiState.value = _uiState.value.copy(isLoading = false)
                 }
         }
     }
@@ -146,18 +190,19 @@ class EditorViewModel @Inject constructor(
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            isSaving = true
-            _uiState.value = EditorUiState.Loading
+            _uiState.value = _uiState.value.copy(isSaving = true, errorMessage = null)
             documentRepository.saveDocument(document)
                 .catch { exception ->
-                    _uiState.value = EditorUiState.Error(exception.message ?: "Unknown error")
+                    _uiState.value = _uiState.value.copy(
+                        isSaving = false,
+                        errorMessage = exception.message ?: "Unknown error"
+                    )
                     _events.emit("Save failed: ${exception.localizedMessage}")
-                    isSaving = false
                 }
                 .collect {
-                    _uiState.value = EditorUiState.Success(document)
+                    syncDocumentState(document)
                     _events.emit("File saved successfully!")
-                    isSaving = false
+                    _uiState.value = _uiState.value.copy(isSaving = false)
                 }
         }
     }
@@ -171,6 +216,13 @@ class EditorViewModel @Inject constructor(
                 withContext(Dispatchers.Main) {
                     currentUri = it
                     documentElements = emptyList()
+                    syncDocumentState(
+                        DocumentData(
+                            filename = fileName,
+                            content = emptyList(),
+                            format = fileName.substringAfterLast('.', "txt")
+                        )
+                    )
                 }
                 _events.emit("New document created")
             }
@@ -181,7 +233,7 @@ class EditorViewModel @Inject constructor(
         uri?.let {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    isSaving = true
+                    _uiState.value = _uiState.value.copy(isSaving = true)
                     documentRepository.saveDocumentToUri(it, documentElements)
                     val fileName = documentRepository.getFileName(it)
                     recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))
@@ -192,9 +244,18 @@ class EditorViewModel @Inject constructor(
                 } catch (e: Exception) {
                     _events.emit("Save failed: ${e.localizedMessage}")
                 } finally {
-                    isSaving = false
+                    _uiState.value = _uiState.value.copy(isSaving = false)
                 }
             }
         }
+    }
+
+    private fun syncDocumentState(document: DocumentData? = _currentDocument.value) {
+        val updatedDocument = document?.copy(content = documentElements)
+        _currentDocument.value = updatedDocument
+        _uiState.value = _uiState.value.copy(
+            documentData = updatedDocument,
+            errorMessage = null
+        )
     }
 }
