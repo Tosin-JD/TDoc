@@ -3,7 +3,6 @@ package com.tosin.docprocessor.data.parser.odt
 import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.parser.internal.models.TableMetadata
 import org.w3c.dom.Element
-import org.w3c.dom.NodeList
 
 import com.tosin.docprocessor.data.parser.internal.models.EdgeInsets
 
@@ -11,7 +10,7 @@ class OdtTableParser(
     private val styles: Map<String, OdtStyleParser.StyleProperties> = emptyMap()
 ) {
 
-    private val tableNs = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+    private val tableNs = OdtNamespaces.TABLE
 
     fun parseTable(element: Element): DocumentElement.Table {
         val rows = mutableListOf<List<String>>()

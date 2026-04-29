@@ -6,19 +6,31 @@ object TDocLogger {
     private const val TAG = "TDocParser"
 
     fun debug(message: String) {
-        Log.d(TAG, message)
+        safeLog("DEBUG", message) { Log.d(TAG, message) }
     }
 
     fun info(message: String) {
-        Log.i(TAG, message)
+        safeLog("INFO", message) { Log.i(TAG, message) }
     }
 
     fun warn(message: String, throwable: Throwable? = null) {
-        Log.w(TAG, message, throwable)
+        safeLog("WARN", message, throwable) { Log.w(TAG, message, throwable) }
     }
 
     fun error(message: String, throwable: Throwable? = null, extra: Map<String, Any?>? = null) {
         val extraInfo = extra?.let { " | Extra: $it" } ?: ""
-        Log.e(TAG, "$message$extraInfo", throwable)
+        safeLog("ERROR", "$message$extraInfo", throwable) { Log.e(TAG, "$message$extraInfo", throwable) }
+    }
+
+    private inline fun safeLog(
+        level: String,
+        message: String,
+        throwable: Throwable? = null,
+        write: () -> Unit
+    ) {
+        runCatching(write).getOrElse {
+            println("$TAG [$level] $message")
+            throwable?.printStackTrace()
+        }
     }
 }

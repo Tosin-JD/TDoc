@@ -2,17 +2,16 @@ package com.tosin.docprocessor.data.parser.odt
 
 import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.parser.internal.models.MetadataInfo
-import org.w3c.dom.Document
 import org.w3c.dom.Element
-import org.w3c.dom.NodeList
+import com.tosin.docprocessor.data.parser.util.TDocLogger
 import java.io.ByteArrayInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 
 class OdtMetadataParser {
 
     private val namespaces = mapOf(
-        "meta" to "urn:oasis:names:tc:opendocument:xmlns:meta:1.0",
-        "dc" to "http://purl.org/dc/elements/1.1/"
+        "meta" to OdtNamespaces.META,
+        "dc" to OdtNamespaces.DC
     )
 
     fun parse(metaXmlBytes: ByteArray?): DocumentElement.Metadata? {
@@ -39,6 +38,7 @@ class OdtMetadataParser {
 
             DocumentElement.Metadata(info = info)
         } catch (e: Exception) {
+            TDocLogger.warn("Failed to parse ODT metadata, continuing without metadata", e)
             null
         }
     }

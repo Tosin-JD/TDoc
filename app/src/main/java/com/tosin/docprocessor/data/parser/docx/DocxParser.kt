@@ -14,6 +14,7 @@ import com.tosin.docprocessor.data.parser.recovery.RecoveryStrategy
 import com.tosin.docprocessor.data.parser.util.DefaultZipExtractor
 import com.tosin.docprocessor.data.parser.util.TDocLogger
 import com.tosin.docprocessor.data.parser.util.ZipExtractor
+import com.tosin.docprocessor.data.parser.util.toArchiveDiagnostics
 import com.tosin.docprocessor.data.parser.validation.DocumentValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -35,13 +36,25 @@ class DocxParser(
     override suspend fun parse(inputStream: java.io.InputStream): Result<List<DocumentElement>> =
         withContext(Dispatchers.IO) {
             var currentElement: String? = null
+            var currentStack: List<String> = emptyList()
+            var bytesProcessed = 0L
+            var documentHash: String? = null
+            var entryCount = 0
+            var elementCount = 0
+            val startTime = System.nanoTime()
             try {
                 TDocLogger.info("Starting DOCX parsing")
                 val entries = zipExtractor.extract(inputStream)
+                val diagnostics = entries.toArchiveDiagnostics("word/document.xml")
+                bytesProcessed = diagnostics.bytesProcessed
+                documentHash = diagnostics.documentHash
+                entryCount = diagnostics.entryCount
                 val docxPackage = DocxPackage.from(entries)
                 val documentXml = docxPackage.xml("word/document.xml")
                     ?: throw IllegalArgumentException("Not a valid DOCX file: missing word/document.xml")
+                currentStack = listOf("word/document.xml")
                 val styles = parseStyles(docxPackage.xml("word/styles.xml"))
+                currentStack = listOf("word/numbering.xml")
                 numberingParser.parse(docxPackage.xml("word/numbering.xml"))
                 val relationships = docxPackage.relationshipsFor("word/document.xml")
                 val body = documentXml.documentElement?.firstChild("body")
@@ -53,19 +66,25 @@ class DocxParser(
                 sectPr?.let { elements += parseSectionHeadersFooters(it, relationships, docxPackage) }
 
                 // Parse footnotes and endnotes
+                currentStack = listOf("word/footnotes.xml")
                 elements += parseNotes(docxPackage.xml("word/footnotes.xml"), com.tosin.docprocessor.data.parser.internal.models.NoteKind.FOOTNOTE)
+                currentStack = listOf("word/endnotes.xml")
                 elements += parseNotes(docxPackage.xml("word/endnotes.xml"), com.tosin.docprocessor.data.parser.internal.models.NoteKind.ENDNOTE)
                 
                 // Parse comments
+                currentStack = listOf("word/comments.xml")
                 elements += parseComments(docxPackage.xml("word/comments.xml"))
+                elementCount = elements.size
 
                 body.children().forEachIndexed { index, child ->
                     currentElement = "BodyElement[$index]: ${child.nodeName}"
+                    currentStack = listOf("word/document.xml", "body[$index]", child.nodeName)
                     try {
                         when {
                             child.matches("p") -> elements += parseParagraph(child, styles, relationships, docxPackage)
                             child.matches("tbl") -> parseTable(child)?.let { elements += it }
                         }
+                        elementCount = elements.size
                     } catch (error: Exception) {
                         recoveryStrategy.handleFailure(currentElement!!, error) { Unit }
                     }
@@ -76,11 +95,34 @@ class DocxParser(
                     TDocLogger.warn("Document validation failed: ${validationResult.errors}")
                 }
 
-                TDocLogger.info("Successfully parsed DOCX with ${elements.size} elements")
+                elementCount = elements.size
+                val durationMs = (System.nanoTime() - startTime) / 1_000_000
+                TDocLogger.info(
+                    "Successfully parsed DOCX with ${elements.size} elements in ${durationMs}ms " +
+                        "(entries=$entryCount, bytes=$bytesProcessed)"
+                )
                 Result.success(elements)
             } catch (e: Exception) {
-                val context = ParseErrorContext(currentElement = currentElement)
-                TDocLogger.error("Failed to parse DOCX", e, mapOf("lastElement" to currentElement))
+                val context = ParseErrorContext(
+                    currentElement = currentElement,
+                    bytesProcessed = bytesProcessed,
+                    elementCount = elementCount,
+                    documentHash = documentHash,
+                    stack = currentStack,
+                    extra = mapOf("entryCount" to entryCount.toString())
+                )
+                TDocLogger.error(
+                    "Failed to parse DOCX",
+                    e,
+                    mapOf(
+                        "lastElement" to currentElement,
+                        "bytesProcessed" to bytesProcessed,
+                        "elementCount" to elementCount,
+                        "documentHash" to documentHash,
+                        "stack" to currentStack,
+                        "entryCount" to entryCount
+                    )
+                )
                 Result.failure(ParseException("Failed to parse DOCX: ${e.message}", context, e))
             }
         }

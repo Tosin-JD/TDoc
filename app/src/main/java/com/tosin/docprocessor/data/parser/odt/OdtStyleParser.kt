@@ -2,13 +2,11 @@ package com.tosin.docprocessor.data.parser.odt
 
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import org.w3c.dom.Element
-import org.w3c.dom.NodeList
 
 class OdtStyleParser {
 
-    private val textNs = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
-    private val styleNs = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
-    private val foNs = "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+    private val styleNs = OdtNamespaces.STYLE
+    private val foNs = OdtNamespaces.FO
 
     /**
      * Maps style names to their formatting properties.
@@ -63,5 +61,9 @@ class OdtStyleParser {
         val color: String? = null,
         val fontSize: Float? = null,
         val alignment: String? = null
-    )
+    ) {
+        companion object {
+            val DEFAULT = StyleProperties()
+        }
+    }
 }

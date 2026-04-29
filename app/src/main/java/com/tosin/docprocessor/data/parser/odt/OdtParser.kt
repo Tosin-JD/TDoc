@@ -8,6 +8,7 @@ import com.tosin.docprocessor.data.parser.exception.ParseException
 import com.tosin.docprocessor.data.parser.recovery.GracefulDegradationStrategy
 import com.tosin.docprocessor.data.parser.recovery.RecoveryStrategy
 import com.tosin.docprocessor.data.parser.util.DefaultZipExtractor
+import com.tosin.docprocessor.data.parser.util.toArchiveDiagnostics
 import com.tosin.docprocessor.data.parser.util.TDocLogger
 import com.tosin.docprocessor.data.parser.util.ZipExtractor
 import com.tosin.docprocessor.data.parser.validation.DocumentValidator
@@ -31,31 +32,67 @@ class OdtParser(
     override suspend fun parse(inputStream: java.io.InputStream): Result<List<DocumentElement>> =
         withContext(Dispatchers.IO) {
             var currentElement: String? = null
+            var currentStack: List<String> = emptyList()
+            var bytesProcessed = 0L
+            var documentHash: String? = null
+            var entryCount = 0
+            var elementCount = 0
+            val startTime = System.nanoTime()
             try {
                 TDocLogger.info("Starting ODT parsing")
                 currentElement = "ZipExtraction"
                 val entries = zipExtractor.extract(inputStream)
+                val diagnostics = entries.toArchiveDiagnostics("content.xml")
+                bytesProcessed = diagnostics.bytesProcessed
+                documentHash = diagnostics.documentHash
+                entryCount = diagnostics.entryCount
                 val contentXml = entries["content.xml"]
                     ?: throw IllegalArgumentException("Not a valid ODT file: missing content.xml")
 
                 val elements = mutableListOf<DocumentElement>()
                 currentElement = "Metadata"
+                currentStack = listOf("meta.xml")
                 metadataParser.parse(entries["meta.xml"])?.let { elements += it }
+                elementCount = elements.size
 
                 currentElement = "ContentXml"
+                currentStack = listOf("content.xml")
                 val xmlParser = OdtXmlParser(cacheDir, entries, recoveryStrategy)
                 elements += xmlParser.parse(contentXml)
+                elementCount = elements.size
 
                 val validationResult = validator.validate(elements)
                 if (!validationResult.isValid) {
                     TDocLogger.warn("Document validation failed: ${validationResult.errors}")
                 }
 
-                TDocLogger.info("Successfully parsed ODT with ${elements.size} elements")
+                val durationMs = (System.nanoTime() - startTime) / 1_000_000
+                TDocLogger.info(
+                    "Successfully parsed ODT with ${elements.size} elements in ${durationMs}ms " +
+                        "(entries=$entryCount, bytes=$bytesProcessed)"
+                )
                 Result.success(elements)
             } catch (e: Exception) {
-                val context = ParseErrorContext(currentElement = currentElement)
-                TDocLogger.error("Failed to parse ODT", e, mapOf("lastElement" to currentElement))
+                val context = ParseErrorContext(
+                    currentElement = currentElement,
+                    bytesProcessed = bytesProcessed,
+                    elementCount = elementCount,
+                    documentHash = documentHash,
+                    stack = currentStack,
+                    extra = mapOf("entryCount" to entryCount.toString())
+                )
+                TDocLogger.error(
+                    "Failed to parse ODT",
+                    e,
+                    mapOf(
+                        "lastElement" to currentElement,
+                        "bytesProcessed" to bytesProcessed,
+                        "elementCount" to elementCount,
+                        "documentHash" to documentHash,
+                        "stack" to currentStack,
+                        "entryCount" to entryCount
+                    )
+                )
                 Result.failure(ParseException("Failed to parse ODT: ${e.message}", context, e))
             }
         }
@@ -104,12 +141,12 @@ class OdtParser(
         return """
             <?xml version="1.0" encoding="UTF-8"?>
             <office:document-content
-                xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
-                xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
-                xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
-                xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
-                xmlns:xlink="http://www.w3.org/1999/xlink"
-                xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+                xmlns:office="${OdtNamespaces.OFFICE}"
+                xmlns:text="${OdtNamespaces.TEXT}"
+                xmlns:table="${OdtNamespaces.TABLE}"
+                xmlns:draw="${OdtNamespaces.DRAW}"
+                xmlns:xlink="${OdtNamespaces.XLINK}"
+                xmlns:fo="${OdtNamespaces.FO}"
                 office:version="1.2">
               <office:body>
                 <office:text>$body</office:text>
@@ -121,10 +158,10 @@ class OdtParser(
     private fun buildStylesXml(): String = """
         <?xml version="1.0" encoding="UTF-8"?>
         <office:document-styles
-            xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
-            xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
-            xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
-            xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+            xmlns:office="${OdtNamespaces.OFFICE}"
+            xmlns:style="${OdtNamespaces.STYLE}"
+            xmlns:text="${OdtNamespaces.TEXT}"
+            xmlns:fo="${OdtNamespaces.FO}"
             office:version="1.2">
           <office:styles>
             <style:style style:name="Bold" style:family="text">
@@ -155,9 +192,9 @@ class OdtParser(
     private fun buildMetaXml(): String = """
         <?xml version="1.0" encoding="UTF-8"?>
         <office:document-meta
-            xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
-            xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
-            xmlns:dc="http://purl.org/dc/elements/1.1/"
+            xmlns:office="${OdtNamespaces.OFFICE}"
+            xmlns:meta="${OdtNamespaces.META}"
+            xmlns:dc="${OdtNamespaces.DC}"
             office:version="1.2">
           <office:meta>
             <meta:generator>TDoc</meta:generator>
@@ -168,7 +205,7 @@ class OdtParser(
     private fun buildManifestXml(): String = """
         <?xml version="1.0" encoding="UTF-8"?>
         <manifest:manifest
-            xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"
+            xmlns:manifest="${OdtNamespaces.MANIFEST}"
             manifest:version="1.2">
           <manifest:file-entry manifest:media-type="application/vnd.oasis.opendocument.text" manifest:full-path="/"/>
           <manifest:file-entry manifest:media-type="text/xml" manifest:full-path="content.xml"/>

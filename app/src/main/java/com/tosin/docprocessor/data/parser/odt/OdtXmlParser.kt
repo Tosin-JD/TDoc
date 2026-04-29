@@ -14,11 +14,6 @@ class OdtXmlParser(
     private val recoveryStrategy: RecoveryStrategy = GracefulDegradationStrategy()
 ) {
 
-    private val officeNs = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
-    private val textNs = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
-    private val tableNs = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
-    private val drawNs = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
-
     private lateinit var styleParser: OdtStyleParser
     private lateinit var paragraphParser: OdtParagraphParser
     private lateinit var tableParser: OdtTableParser
@@ -39,10 +34,10 @@ class OdtXmlParser(
         val elements = mutableListOf<DocumentElement>()
         
         // Find office:body/office:text
-        val bodyNodes = root.getElementsByTagNameNS(officeNs, "body")
+        val bodyNodes = root.getElementsByTagNameNS(OdtNamespaces.OFFICE, "body")
         if (bodyNodes.length > 0) {
             val body = bodyNodes.item(0) as Element
-            val textNodes = body.getElementsByTagNameNS(officeNs, "text")
+            val textNodes = body.getElementsByTagNameNS(OdtNamespaces.OFFICE, "text")
             if (textNodes.length > 0) {
                 traverse(textNodes.item(0), elements, ListContext())
             }
@@ -78,7 +73,7 @@ class OdtXmlParser(
                         "list" -> {
                             val newListContext = listContext.copy(
                                 depth = listContext.depth + 1,
-                                styleName = element.getAttributeNS(textNs, "style-name").takeIf { it.isNotEmpty() } ?: listContext.styleName
+                                styleName = element.getAttributeNS(OdtNamespaces.TEXT, "style-name").takeIf { it.isNotEmpty() } ?: listContext.styleName
                             )
                             traverse(child, output, newListContext)
                         }
