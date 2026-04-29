@@ -94,6 +94,13 @@ class EditorViewModel @Inject constructor(
         }
     }
 
+    fun closeDocument() {
+        currentUri = null
+        documentElements = emptyList()
+        _currentDocument.value = null
+        _uiState.value = EditorUiState()
+    }
+
     fun updateParagraph(index: Int, newContent: AnnotatedString) {
         if (_uiState.value.editorMode != EditorMode.EDIT) return
 

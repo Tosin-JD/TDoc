@@ -54,10 +54,10 @@ class SharedPrefsRecentFileDao @Inject constructor(
         preferences.edit().putString(KEY_RECENT_FILES, jsonArray.toString()).apply()
     }
 
-    private fun loadEntries(): List<RecentFile> {
+    private fun loadEntries(): List<RecentFile> = runCatching {
         val rawJson = preferences.getString(KEY_RECENT_FILES, null) ?: return emptyList()
         val jsonArray = JSONArray(rawJson)
-        return buildList {
+        buildList {
             for (index in 0 until jsonArray.length()) {
                 val item = jsonArray.getJSONObject(index)
                 add(
@@ -71,7 +71,7 @@ class SharedPrefsRecentFileDao @Inject constructor(
                 )
             }
         }.sortedByDescending { it.lastAccessed }
-    }
+    }.getOrDefault(emptyList())
 
     private companion object {
         const val PREFS_NAME = "tdoc_recent_files"

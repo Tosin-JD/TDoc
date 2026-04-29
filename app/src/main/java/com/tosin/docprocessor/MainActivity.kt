@@ -4,7 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.tosin.docprocessor.ui.editor.EditorScreen
+import com.tosin.docprocessor.ui.AppRoot
 import com.tosin.docprocessor.ui.theme.TDocTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -15,12 +15,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             TDocTheme {
-                EditorScreen()
+                AppRoot()
             }
         }
     }
 }
-
 
 
 

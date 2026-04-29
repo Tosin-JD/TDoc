@@ -2,6 +2,7 @@ package com.tosin.docprocessor.ui.editor
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SaveAs
 import androidx.compose.material.icons.filled.Smartphone
@@ -44,7 +46,11 @@ import com.tosin.docprocessor.ui.editor.layouts.print.PrintLayout
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
+fun EditorScreen(
+    openDocumentUri: Uri? = null,
+    onCloseRequest: () -> Unit = {},
+    viewModel: EditorViewModel = hiltViewModel()
+) {
     val snackbarHostState = remember { SnackbarHostState() }
     val focusRequester = remember { FocusRequester() }
     val uiState by viewModel.uiState.collectAsState()
@@ -53,6 +59,10 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
         viewModel.events.collect { message ->
             snackbarHostState.showSnackbar(message)
         }
+    }
+
+    LaunchedEffect(openDocumentUri?.toString()) {
+        openDocumentUri?.let { viewModel.onFilePicked(it) }
     }
 
     LaunchedEffect(viewModel.documentElements.isNotEmpty()) {
@@ -81,6 +91,14 @@ fun EditorScreen(viewModel: EditorViewModel = hiltViewModel()) {
         topBar = {
             TopAppBar(
                 title = { Text("TDoc") },
+                navigationIcon = {
+                    IconButton(onClick = {
+                        viewModel.closeDocument()
+                        onCloseRequest()
+                    }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close document")
+                    }
+                },
                 actions = {
                     IconButton(onClick = {
                         viewModel.setViewMode(
