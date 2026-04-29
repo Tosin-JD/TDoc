@@ -124,10 +124,29 @@ class OdtParser(
             xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
             xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
             xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+            xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
             office:version="1.2">
           <office:styles>
-            <style:style style:name="Heading_20_1" style:family="paragraph">
-              <style:paragraph-properties/>
+            <style:style style:name="Bold" style:family="text">
+              <style:text-properties fo:font-weight="bold"/>
+            </style:style>
+            <style:style style:name="Italic" style:family="text">
+              <style:text-properties fo:font-style="italic"/>
+            </style:style>
+            <style:style style:name="Underline" style:family="text">
+              <style:text-properties style:text-underline-style="solid"/>
+            </style:style>
+            <style:style style:name="Bold_Italic" style:family="text">
+              <style:text-properties fo:font-weight="bold" fo:font-style="italic"/>
+            </style:style>
+            <style:style style:name="Bold_Underline" style:family="text">
+              <style:text-properties fo:font-weight="bold" style:text-underline-style="solid"/>
+            </style:style>
+            <style:style style:name="Italic_Underline" style:family="text">
+              <style:text-properties fo:font-style="italic" style:text-underline-style="solid"/>
+            </style:style>
+            <style:style style:name="Bold_Italic_Underline" style:family="text">
+              <style:text-properties fo:font-weight="bold" fo:font-style="italic" style:text-underline-style="solid"/>
             </style:style>
           </office:styles>
         </office:document-styles>
@@ -160,7 +179,26 @@ class OdtParser(
 
     private fun renderElement(element: DocumentElement): String =
         when (element) {
-            is DocumentElement.Paragraph -> "<text:p>${escapeXml(element.spans.joinToString("") { it.text })}</text:p>"
+            is DocumentElement.Paragraph -> {
+                val spans = element.spans.joinToString("") { span ->
+                    val styles = mutableListOf<String>()
+                    if (span.isBold) styles += "Bold"
+                    if (span.isItalic) styles += "Italic"
+                    if (span.isUnderline) styles += "Underline"
+                    
+                    if (styles.isEmpty()) {
+                        escapeXml(span.text)
+                    } else {
+                        "<text:span text:style-name=\"${styles.joinToString("_")}\">${escapeXml(span.text)}</text:span>"
+                    }
+                }
+                val p = "<text:p>${spans}</text:p>"
+                if (element.listInfo != null) {
+                    "<text:list><text:list-item>$p</text:list-item></text:list>"
+                } else {
+                    p
+                }
+            }
             is DocumentElement.SectionHeader -> "<text:h text:outline-level=\"${element.level.coerceAtLeast(1)}\">${escapeXml(element.text)}</text:h>"
             is DocumentElement.Table -> {
                 val rows = element.rows.joinToString("") { row ->

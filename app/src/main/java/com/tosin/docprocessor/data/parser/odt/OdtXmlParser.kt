@@ -33,7 +33,7 @@ class OdtXmlParser(
         val styles = styleParser.parseStyles(root)
         
         paragraphParser = OdtParagraphParser(styles)
-        tableParser = OdtTableParser()
+        tableParser = OdtTableParser(styles)
         imageParser = OdtImageParser(cacheDir, zipEntries)
 
         val elements = mutableListOf<DocumentElement>()
@@ -44,14 +44,19 @@ class OdtXmlParser(
             val body = bodyNodes.item(0) as Element
             val textNodes = body.getElementsByTagNameNS(officeNs, "text")
             if (textNodes.length > 0) {
-                traverse(textNodes.item(0), elements)
+                traverse(textNodes.item(0), elements, ListContext())
             }
         }
 
         return elements
     }
 
-    private fun traverse(node: Node, output: MutableList<DocumentElement>) {
+    private data class ListContext(
+        val depth: Int = 0,
+        val styleName: String? = null
+    )
+
+    private fun traverse(node: Node, output: MutableList<DocumentElement>, listContext: ListContext) {
         val children = node.childNodes
         for (i in 0 until children.length) {
             val child = children.item(i)
@@ -60,10 +65,26 @@ class OdtXmlParser(
                 try {
                     when (element.localName) {
                         "h" -> output += paragraphParser.parseHeader(element)
-                        "p" -> output += paragraphParser.parseParagraph(element)
+                        "p" -> {
+                            val listInfo = if (listContext.depth > 0) {
+                                com.tosin.docprocessor.data.parser.internal.models.ListInfo(
+                                    level = listContext.depth - 1,
+                                    format = listContext.styleName
+                                )
+                            } else null
+                            output += paragraphParser.parseParagraph(element, listInfo)
+                        }
                         "table" -> output += tableParser.parseTable(element)
+                        "list" -> {
+                            val newListContext = listContext.copy(
+                                depth = listContext.depth + 1,
+                                styleName = element.getAttributeNS(textNs, "style-name").takeIf { it.isNotEmpty() } ?: listContext.styleName
+                            )
+                            traverse(child, output, newListContext)
+                        }
+                        "list-item" -> traverse(child, output, listContext)
                         "frame" -> imageParser.parseImage(element)?.let { output += it }
-                        else -> traverse(child, output) // Recursive for sections/lists etc.
+                        else -> traverse(child, output, listContext)
                     }
                 } catch (e: Exception) {
                     recoveryStrategy.handleFailure("ODT Element: ${element.localName}", e) {

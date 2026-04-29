@@ -46,7 +46,14 @@ class OdtStyleParser {
             fontSize = props.getAttributeNS(foNs, "font-size").removeSuffix("pt").toFloatOrNull()
         }
 
-        return StyleProperties(isBold, isItalic, isUnderline, color, fontSize)
+        var alignment: String? = null
+        val paraPropNodes = styleElement.getElementsByTagNameNS(styleNs, "paragraph-properties")
+        if (paraPropNodes.length > 0) {
+            val props = paraPropNodes.item(0) as Element
+            alignment = props.getAttributeNS(foNs, "text-align")
+        }
+
+        return StyleProperties(isBold, isItalic, isUnderline, color, fontSize, alignment)
     }
 
     data class StyleProperties(
@@ -54,6 +61,7 @@ class OdtStyleParser {
         val isItalic: Boolean = false,
         val isUnderline: Boolean = false,
         val color: String? = null,
-        val fontSize: Float? = null
+        val fontSize: Float? = null,
+        val alignment: String? = null
     )
 }

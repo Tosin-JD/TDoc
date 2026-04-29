@@ -17,24 +17,32 @@ class OdtParagraphParser(
     private val textNs = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
     private val xlinkNs = "http://www.w3.org/1999/xlink"
 
-    fun parseParagraph(element: Element): DocumentElement.Paragraph {
+    fun parseParagraph(element: Element, listInfo: com.tosin.docprocessor.data.parser.internal.models.ListInfo? = null): List<DocumentElement> {
         val spans = mutableListOf<TextSpan>()
-        collectSpans(element, spans)
+        val extraElements = mutableListOf<DocumentElement>()
+        collectSpans(element, spans, extraElements)
         
         val styleName = element.getAttributeNS(textNs, "style-name")
         val properties = styles[styleName]
         
-        return DocumentElement.Paragraph(
+        val paragraph = DocumentElement.Paragraph(
             spans = spans,
             listLabel = null,
             style = ParagraphStyle(
-                alignment = ParagraphAlignment.START,
+                alignment = when (properties?.alignment) {
+                    "center" -> ParagraphAlignment.CENTER
+                    "end", "right" -> ParagraphAlignment.END
+                    "justify" -> ParagraphAlignment.JUSTIFIED
+                    else -> ParagraphAlignment.START
+                },
                 indentation = ParagraphIndentation(),
                 spacing = ParagraphSpacing()
             ),
             hyperlink = null,
-            listInfo = null
+            listInfo = listInfo
         )
+        
+        return listOf(paragraph) + extraElements
     }
 
     fun parseHeader(element: Element): DocumentElement.SectionHeader {
@@ -43,7 +51,7 @@ class OdtParagraphParser(
         return DocumentElement.SectionHeader(text = text, level = level)
     }
 
-    private fun collectSpans(node: Node, output: MutableList<TextSpan>) {
+    private fun collectSpans(node: Node, output: MutableList<TextSpan>, extraElements: MutableList<DocumentElement>) {
         val children = node.childNodes
         for (i in 0 until children.length) {
             val child = children.item(i)
@@ -85,7 +93,34 @@ class OdtParagraphParser(
                                 // We could add hyperlink info to TextSpan if it supported it
                             )
                         }
-                        else -> collectSpans(element, output)
+                        "footnote", "endnote" -> {
+                            val kind = if (element.localName == "footnote") 
+                                com.tosin.docprocessor.data.parser.internal.models.NoteKind.FOOTNOTE 
+                            else 
+                                com.tosin.docprocessor.data.parser.internal.models.NoteKind.ENDNOTE
+                            
+                            val body = element.getElementsByTagNameNS(textNs, "${element.localName}-body").item(0) as? Element
+                            val text = body?.textContent?.trim().orEmpty()
+                            extraElements += DocumentElement.Note(
+                                info = com.tosin.docprocessor.data.parser.internal.models.NoteInfo(
+                                    kind = kind,
+                                    id = "odt_${System.currentTimeMillis()}",
+                                    text = text
+                                )
+                            )
+                        }
+                        "annotation" -> {
+                            val author = element.getElementsByTagNameNS("http://purl.org/dc/elements/1.1/", "creator").item(0)?.textContent
+                            val text = element.textContent.trim()
+                            extraElements += DocumentElement.Comment(
+                                info = com.tosin.docprocessor.data.parser.internal.models.CommentInfo(
+                                    id = "odt_${System.currentTimeMillis()}",
+                                    author = author,
+                                    text = text
+                                )
+                            )
+                        }
+                        else -> collectSpans(element, output, extraElements)
                     }
                 }
             }

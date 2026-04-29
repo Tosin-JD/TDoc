@@ -28,7 +28,8 @@ class DocxParser(
     private val cacheDir: File,
     private val zipExtractor: ZipExtractor = DefaultZipExtractor(),
     private val validator: DocumentValidator = DocumentValidator(),
-    private val recoveryStrategy: RecoveryStrategy = GracefulDegradationStrategy()
+    private val recoveryStrategy: RecoveryStrategy = GracefulDegradationStrategy(),
+    private val numberingParser: DocxNumberingParser = DocxNumberingParser()
 ) : DocumentParser {
 
     override suspend fun parse(inputStream: java.io.InputStream): Result<List<DocumentElement>> =
@@ -41,11 +42,23 @@ class DocxParser(
                 val documentXml = docxPackage.xml("word/document.xml")
                     ?: throw IllegalArgumentException("Not a valid DOCX file: missing word/document.xml")
                 val styles = parseStyles(docxPackage.xml("word/styles.xml"))
+                numberingParser.parse(docxPackage.xml("word/numbering.xml"))
                 val relationships = docxPackage.relationshipsFor("word/document.xml")
                 val body = documentXml.documentElement?.firstChild("body")
                     ?: throw IllegalArgumentException("DOCX document is missing body")
 
                 val elements = mutableListOf<DocumentElement>()
+                
+                val sectPr = body.firstChild("sectPr")
+                sectPr?.let { elements += parseSectionHeadersFooters(it, relationships, docxPackage) }
+
+                // Parse footnotes and endnotes
+                elements += parseNotes(docxPackage.xml("word/footnotes.xml"), com.tosin.docprocessor.data.parser.internal.models.NoteKind.FOOTNOTE)
+                elements += parseNotes(docxPackage.xml("word/endnotes.xml"), com.tosin.docprocessor.data.parser.internal.models.NoteKind.ENDNOTE)
+                
+                // Parse comments
+                elements += parseComments(docxPackage.xml("word/comments.xml"))
+
                 body.children().forEachIndexed { index, child ->
                     currentElement = "BodyElement[$index]: ${child.nodeName}"
                     try {
@@ -108,6 +121,13 @@ class DocxParser(
             }
             val snapshot = spans.toList()
             spans.clear()
+            
+            val numPr = paragraph.firstChild("pPr")?.firstChild("numPr")
+            val listInfo = numberingParser.getListInfo(
+                numPr?.firstChild("numId")?.attribute("val"),
+                numPr?.firstChild("ilvl")?.attribute("val")
+            )
+
             if (paragraphStyle.headingLevel != null && paragraphText.isNotBlank()) {
                 elements += DocumentElement.SectionHeader(
                     text = paragraphText.trim(),
@@ -116,7 +136,8 @@ class DocxParser(
             } else {
                 elements += DocumentElement.Paragraph(
                     spans = snapshot,
-                    style = paragraphStyle
+                    style = paragraphStyle,
+                    listInfo = listInfo
                 )
             }
         }
@@ -157,6 +178,10 @@ class DocxParser(
     }
 
     private fun parseTable(table: Element): DocumentElement.Table? {
+        val tblPr = table.firstChild("tblPr")
+        val tableStyleId = tblPr?.firstChild("tblStyle")?.attribute("val")
+        val shadingColor = tblPr?.firstChild("shading")?.attribute("fill")
+        
         val rows = table.children("tr").map { row ->
             row.children("tc").map { cell ->
                 cell.descendants("p")
@@ -172,7 +197,88 @@ class DocxParser(
             }
         }.filter { row -> row.isNotEmpty() }
 
-        return if (rows.isEmpty()) null else DocumentElement.Table(rows = rows)
+        return if (rows.isEmpty()) null else DocumentElement.Table(
+            rows = rows,
+            metadata = com.tosin.docprocessor.data.parser.internal.models.TableMetadata(
+                styleId = tableStyleId,
+                shadingColor = shadingColor
+            )
+        )
+    }
+
+    private fun parseSectionHeadersFooters(
+        sectPr: Element,
+        relationships: Map<String, String>,
+        docxPackage: DocxPackage
+    ): List<DocumentElement> {
+        val elements = mutableListOf<DocumentElement>()
+        
+        fun parseRef(type: String, kind: com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind) {
+            sectPr.children(type).forEach { ref ->
+                val rId = ref.attribute("id") ?: return@forEach
+                val target = relationships[rId] ?: return@forEach
+                val xml = docxPackage.xml(target) ?: return@forEach
+                val text = xml.documentElement.textContent.trim()
+                elements += DocumentElement.HeaderFooter(
+                    content = com.tosin.docprocessor.data.parser.internal.models.HeaderFooterContent(
+                        kind = kind,
+                        variant = ref.attribute("type") ?: "default",
+                        text = text,
+                        paragraphCount = xml.documentElement.descendants("p").size,
+                        tableCount = xml.documentElement.descendants("tbl").size
+                    )
+                )
+            }
+        }
+
+        parseRef("headerReference", com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind.HEADER)
+        parseRef("footerReference", com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind.FOOTER)
+        
+        return elements
+    }
+
+    private fun parseNotes(xml: Document?, kind: com.tosin.docprocessor.data.parser.internal.models.NoteKind): List<DocumentElement> {
+        if (xml == null) return emptyList()
+        val elements = mutableListOf<DocumentElement>()
+        val tagName = when (kind) {
+            com.tosin.docprocessor.data.parser.internal.models.NoteKind.FOOTNOTE -> "footnote"
+            com.tosin.docprocessor.data.parser.internal.models.NoteKind.ENDNOTE -> "endnote"
+        }
+        
+        xml.documentElement.children(tagName).forEach { note ->
+            val id = note.attribute("id") ?: return@forEach
+            if (id.toIntOrNull() ?: 0 <= 0) return@forEach
+            
+            val text = note.descendants("t").joinToString("") { it.textContent.orEmpty() }
+            elements += DocumentElement.Note(
+                info = com.tosin.docprocessor.data.parser.internal.models.NoteInfo(
+                    kind = kind,
+                    id = id,
+                    text = text
+                )
+            )
+        }
+        return elements
+    }
+
+    private fun parseComments(xml: Document?): List<DocumentElement> {
+        if (xml == null) return emptyList()
+        val elements = mutableListOf<DocumentElement>()
+        
+        xml.documentElement.children("comment").forEach { comment ->
+            val id = comment.attribute("id") ?: return@forEach
+            val author = comment.attribute("author")
+            val text = comment.descendants("t").joinToString("") { it.textContent.orEmpty() }
+            
+            elements += DocumentElement.Comment(
+                info = com.tosin.docprocessor.data.parser.internal.models.CommentInfo(
+                    id = id,
+                    author = author,
+                    text = text
+                )
+            )
+        }
+        return elements
     }
 
     private fun parseRun(run: Element): RunContent {

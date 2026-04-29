@@ -7,7 +7,9 @@ import org.w3c.dom.NodeList
 
 import com.tosin.docprocessor.data.parser.internal.models.EdgeInsets
 
-class OdtTableParser {
+class OdtTableParser(
+    private val styles: Map<String, OdtStyleParser.StyleProperties> = emptyMap()
+) {
 
     private val tableNs = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
 
@@ -26,6 +28,9 @@ class OdtTableParser {
                 
                 // Handle column span
                 val span = cellElement.getAttributeNS(tableNs, "number-columns-spanned").toIntOrNull() ?: 1
+                val cellStyleName = cellElement.getAttributeNS(tableNs, "style-name")
+                val cellStyle = styles[cellStyleName]
+                
                 repeat(span) {
                     cells.add(cellText)
                 }
@@ -33,14 +38,17 @@ class OdtTableParser {
             rows.add(cells)
         }
 
+        val tableStyleName = element.getAttributeNS(tableNs, "style-name")
+        val tableStyle = styles[tableStyleName]
+
         return DocumentElement.Table(
             rows = rows,
             hasHeader = false,
             metadata = TableMetadata(
-                styleId = "Default",
+                styleId = tableStyleName.takeIf { it.isNotEmpty() } ?: "Default",
+                shadingColor = tableStyle?.color, // Simplification: ODT table shading is usually in table-cell-properties
                 caption = null,
                 description = null,
-                shadingColor = null,
                 borderSummary = null,
                 cellMargins = EdgeInsets()
             )
