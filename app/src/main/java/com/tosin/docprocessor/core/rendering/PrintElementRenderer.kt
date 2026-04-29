@@ -44,6 +44,7 @@ class PrintElementRenderer(
         if (layout != null) {
             drawIntoCanvas { canvas ->
                 canvas.nativeCanvas.save()
+                canvas.nativeCanvas.clipRect(x, y, x + width, y + height)
                 canvas.nativeCanvas.translate(x, y)
                 layout.draw(canvas.nativeCanvas)
                 canvas.nativeCanvas.restore()
@@ -134,7 +135,10 @@ class PrintElementRenderer(
         val cellPaddingPx = unitConverter.ptToPx(tableLayout.cellPaddingPt)
 
         tableLayout.rowLayouts.forEach { rowLayout ->
-            val rowHeightPx = unitConverter.ptToPx(rowLayout.heightPt)
+            val rowBottom = (currentY + unitConverter.ptToPx(rowLayout.heightPt)).coerceAtMost(y + height)
+            val rowHeightPx = (rowBottom - currentY).coerceAtLeast(0f)
+            if (rowHeightPx == 0f) return@forEach
+
             if (rowLayout.isHeader) {
                 drawRect(
                     color = Color(0xFFF2F2F2),
@@ -144,8 +148,16 @@ class PrintElementRenderer(
             }
 
             var currentX = x
-            rowLayout.cells.forEach { cell ->
-                val cellWidthPx = unitConverter.ptToPx(cell.widthPt)
+            rowLayout.cells.forEachIndexed { cellIndex, cell ->
+                val remainingWidthPx = (x + width - currentX).coerceAtLeast(0f)
+                if (remainingWidthPx == 0f) return@forEachIndexed
+
+                val cellWidthPx = if (cellIndex == rowLayout.cells.lastIndex) {
+                    remainingWidthPx
+                } else {
+                    unitConverter.ptToPx(cell.widthPt).coerceAtMost(remainingWidthPx)
+                }
+
                 drawRect(
                     color = Color(0xFFB0B0B0),
                     topLeft = Offset(currentX, currentY),
@@ -156,6 +168,12 @@ class PrintElementRenderer(
                 if (cell.layout != null && cell.text.isNotBlank()) {
                     drawIntoCanvas { canvas ->
                         canvas.nativeCanvas.save()
+                        canvas.nativeCanvas.clipRect(
+                            currentX + cellPaddingPx,
+                            currentY + cellPaddingPx,
+                            currentX + cellWidthPx - cellPaddingPx,
+                            currentY + rowHeightPx - cellPaddingPx
+                        )
                         canvas.nativeCanvas.translate(currentX + cellPaddingPx, currentY + cellPaddingPx)
                         cell.layout.draw(canvas.nativeCanvas)
                         canvas.nativeCanvas.restore()
