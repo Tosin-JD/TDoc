@@ -93,7 +93,7 @@ class OdtParser(
                         is DocumentElement.Image -> {
                             element.caption?.takeIf { it.isNotBlank() }?.let { odtDoc.addText(it + "\n") }
                         }
-                        DocumentElement.PageBreak -> odtDoc.addText("\n")
+                        is DocumentElement.PageBreak -> odtDoc.addText("\n")
                     }
                 }
                 odtDoc.save(outputStream)

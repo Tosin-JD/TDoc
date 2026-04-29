@@ -39,7 +39,7 @@ class DocxStructureParser(
         val output = mutableListOf<DocumentElement>()
         output += paragraph.ctp.bookmarkStartList.map {
             DocumentElement.Bookmark(
-                BookmarkInfo(
+                info = BookmarkInfo(
                     id = it.id.toString(),
                     name = it.name.orEmpty(),
                     boundary = BookmarkBoundary.START,
@@ -49,7 +49,7 @@ class DocxStructureParser(
         }
         output += paragraph.ctp.bookmarkEndList.map {
             DocumentElement.Bookmark(
-                BookmarkInfo(
+                info = BookmarkInfo(
                     id = it.id.toString(),
                     name = "",
                     boundary = BookmarkBoundary.END,
@@ -89,7 +89,7 @@ class DocxStructureParser(
     private fun parseHeadersAndFooters(document: XWPFDocument): List<DocumentElement.HeaderFooter> {
         val headers = document.headerList.mapIndexed { index, header ->
             DocumentElement.HeaderFooter(
-                header.toContent(
+                content = header.toContent(
                     kind = HeaderFooterKind.HEADER,
                     variant = resolveVariant(index, header.text)
                 )
@@ -97,7 +97,7 @@ class DocxStructureParser(
         }
         val footers = document.footerList.mapIndexed { index, footer ->
             DocumentElement.HeaderFooter(
-                footer.toContent(
+                content = footer.toContent(
                     kind = HeaderFooterKind.FOOTER,
                     variant = resolveVariant(index, footer.text)
                 )
@@ -123,7 +123,7 @@ class DocxStructureParser(
             .orEmpty()
             .map { comment ->
                 DocumentElement.Comment(
-                    CommentInfo(
+                    info = CommentInfo(
                         id = comment.id,
                         author = comment.author,
                         initials = comment.initials,
@@ -195,7 +195,7 @@ class DocxStructureParser(
 
     private fun XWPFFootnote.toNote(kind: NoteKind): DocumentElement.Note =
         DocumentElement.Note(
-            NoteInfo(
+            info = NoteInfo(
                 kind = kind,
                 id = id.toString(),
                 text = paragraphs.joinToString("\n") { it.text }
@@ -204,7 +204,7 @@ class DocxStructureParser(
 
     private fun XWPFEndnote.toNote(kind: NoteKind): DocumentElement.Note =
         DocumentElement.Note(
-            NoteInfo(
+            info = NoteInfo(
                 kind = kind,
                 id = id.toString(),
                 text = paragraphs.joinToString("\n") { it.text }

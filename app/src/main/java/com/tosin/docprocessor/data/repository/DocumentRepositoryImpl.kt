@@ -138,7 +138,7 @@ class DocumentRepositoryImpl @Inject constructor(
                 is DocumentElement.EmbeddedObject -> element.info.description ?: element.info.kind
                 is DocumentElement.Table -> element.rows.joinToString("\n") { row -> row.joinToString("\t") }
                 is DocumentElement.Image -> element.caption ?: element.altText.orEmpty()
-                DocumentElement.PageBreak -> ""
+                is DocumentElement.PageBreak -> ""
             }
         }
 }

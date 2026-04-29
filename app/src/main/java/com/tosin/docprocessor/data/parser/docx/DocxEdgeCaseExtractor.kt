@@ -74,7 +74,7 @@ class DocxEdgeCaseExtractor : DocxPackageExtractor {
             },
             source = "word/settings.xml"
         )
-        return DocumentElement.Metadata(info)
+        return DocumentElement.Metadata(info = info)
     }
 
     private fun extractCustomXml(docxPackage: DocxPackage): DocumentElement.Metadata? {
@@ -95,7 +95,7 @@ class DocxEdgeCaseExtractor : DocxPackageExtractor {
         }
 
         return DocumentElement.Metadata(
-            MetadataInfo(
+            info = MetadataInfo(
                 kind = "custom-xml-collection",
                 title = "Custom XML Data",
                 summary = "${children.size} data parts",
@@ -125,7 +125,7 @@ class DocxEdgeCaseExtractor : DocxPackageExtractor {
             },
             source = "word/settings.xml"
         )
-        return DocumentElement.Metadata(info)
+        return DocumentElement.Metadata(info = info)
     }
 
     private fun extractInteractiveContent(docxPackage: DocxPackage): DocumentElement.Metadata? {
@@ -167,7 +167,7 @@ class DocxEdgeCaseExtractor : DocxPackageExtractor {
 
         if (children.isEmpty()) return null
         return DocumentElement.Metadata(
-            MetadataInfo(
+            info = MetadataInfo(
                 kind = "interactive-content",
                 title = "Interactive & Advanced Content",
                 summary = "Macros, Signatures, or ActiveX found",
@@ -192,7 +192,7 @@ class DocxEdgeCaseExtractor : DocxPackageExtractor {
         }
 
         return DocumentElement.Metadata(
-            MetadataInfo(
+            info = MetadataInfo(
                 kind = "embeddings-collection",
                 title = "Embedded Objects & Files",
                 summary = "${children.size} embedded items",
@@ -229,7 +229,7 @@ class DocxEdgeCaseExtractor : DocxPackageExtractor {
         }
 
         return DocumentElement.Metadata(
-            MetadataInfo(
+            info = MetadataInfo(
                 kind = "accessibility-data",
                 title = "Accessibility Metadata",
                 summary = "${children.size} objects with alt text",
@@ -260,7 +260,7 @@ class DocxEdgeCaseExtractor : DocxPackageExtractor {
             },
             source = "word/settings.xml"
         )
-        return DocumentElement.Metadata(info)
+        return DocumentElement.Metadata(info = info)
     }
 
     private fun extractPlaceholders(docxPackage: DocxPackage): DocumentElement.Metadata? {
@@ -276,6 +276,6 @@ class DocxEdgeCaseExtractor : DocxPackageExtractor {
             attributes = mapOf("count" to placeholders.size.toString()),
             source = "word/document.xml"
         )
-        return DocumentElement.Metadata(info)
+        return DocumentElement.Metadata(info = info)
     }
 }

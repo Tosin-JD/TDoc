@@ -9,6 +9,6 @@ class DocxPageBreakParser {
         paragraph.runs.flatMap { run ->
             val explicitBreaks = run.ctr.brList.count { it.type?.toString()?.equals("page", ignoreCase = true) == true }
             val renderedBreaks = run.ctr.lastRenderedPageBreakList.size
-            List(explicitBreaks + renderedBreaks) { DocumentElement.PageBreak }
+            List(explicitBreaks + renderedBreaks) { DocumentElement.PageBreak() }
         }
 }

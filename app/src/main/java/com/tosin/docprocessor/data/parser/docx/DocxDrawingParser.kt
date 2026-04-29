@@ -15,7 +15,7 @@ class DocxDrawingParser {
             drawing.inlineList.forEach { inline ->
                 val xml = inline.xmlText()
                 output += DocumentElement.Drawing(
-                    DrawingInfo(
+                    info = DrawingInfo(
                         kind = "drawing",
                         isInline = true,
                         widthEmu = inline.extent?.cx,
@@ -33,7 +33,7 @@ class DocxDrawingParser {
             drawing.anchorList.forEach { anchor ->
                 val xml = anchor.xmlText()
                 output += DocumentElement.Drawing(
-                    DrawingInfo(
+                    info = DrawingInfo(
                         kind = "drawing",
                         isInline = false,
                         widthEmu = anchor.extent?.cx,
@@ -56,7 +56,7 @@ class DocxDrawingParser {
 
         ctr.pictList.forEach { pict ->
             output += DocumentElement.Drawing(
-                DrawingInfo(
+                info = DrawingInfo(
                     kind = "pict",
                     isInline = true,
                     altText = pict.xmlText().substringAfter("alt=\"", "").substringBefore("\"", ""),
@@ -69,7 +69,7 @@ class DocxDrawingParser {
         ctr.objectList.forEach { obj ->
             val xml = obj.xmlText()
             output += DocumentElement.EmbeddedObject(
-                EmbeddedObjectInfo(
+                info = EmbeddedObjectInfo(
                     kind = "ole-object",
                     programId = xml.substringAfter("ProgID=\"", "").substringBefore("\"", ""),
                     shapeId = obj.dxaOrig?.toString(),

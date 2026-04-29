@@ -10,7 +10,7 @@ class DocxFieldParser {
         val simpleFields = paragraph.ctp.fldSimpleList.map { simpleField ->
             val instruction = simpleField.instr.orEmpty().trim()
             DocumentElement.Field(
-                FieldInfo(
+                info = FieldInfo(
                     type = classifyField(instruction),
                     instruction = instruction,
                     value = simpleField.fldData?.stringValue,
@@ -93,7 +93,7 @@ class DocxFieldParser {
 
         return instructions.map { instruction ->
             DocumentElement.Field(
-                FieldInfo(
+                info = FieldInfo(
                     type = classifyField(instruction),
                     instruction = instruction,
                     value = paragraph.text,

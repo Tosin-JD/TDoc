@@ -13,9 +13,11 @@ class PrintElementRenderer {
 
     fun render(canvas: Canvas, positionedElement: PositionedElement, scale: Float) {
         val element = positionedElement.element
-        val x = positionedElement.x * scale
-        val y = positionedElement.y * scale
-        val width = positionedElement.width * scale
+        val bounds = positionedElement.bounds
+        val x = bounds.left * scale
+        val y = bounds.top * scale
+        val width = bounds.width() * scale
+        val height = bounds.height() * scale
 
         when (element) {
             is DocumentElement.Paragraph -> {
@@ -39,7 +41,7 @@ class PrintElementRenderer {
                     color = Color.LTGRAY
                     style = Paint.Style.STROKE
                 }
-                canvas.drawRect(x, y, x + width, y + (positionedElement.height * scale), paint)
+                canvas.drawRect(x, y, x + width, y + height, paint)
                 // Draw image logic here
             }
             // Add other renderers
@@ -48,7 +50,7 @@ class PrintElementRenderer {
                     color = Color.MAGENTA
                     alpha = 50
                 }
-                canvas.drawRect(x, y, x + width, y + (positionedElement.height * scale), paint)
+                canvas.drawRect(x, y, x + width, y + height, paint)
             }
         }
     }

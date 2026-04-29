@@ -37,7 +37,7 @@ class OdtMetadataParser {
                 attributes = attributes
             )
 
-            DocumentElement.Metadata(info)
+            DocumentElement.Metadata(info = info)
         } catch (e: Exception) {
             null
         }

@@ -133,7 +133,7 @@ fun DocumentElementRenderer(element: DocumentElement, index: Int, viewModel: Edi
             "embedded object: ${element.info.programId ?: element.info.kind}"
         )
 
-        DocumentElement.PageBreak -> {
+        is DocumentElement.PageBreak -> {
             Text(text = "", modifier = Modifier.padding(vertical = 12.dp))
         }
     }

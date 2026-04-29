@@ -146,7 +146,7 @@ class DocxParser(
                             )
                             is DocumentElement.Table -> writeTable(document, element)
                             is DocumentElement.Image -> writeImage(document, element)
-                            DocumentElement.PageBreak -> document.createParagraph().createRun().addBreak(BreakType.PAGE)
+                            is DocumentElement.PageBreak -> document.createParagraph().createRun().addBreak(BreakType.PAGE)
                         }
                     }
                     document.write(outputStream)

@@ -289,7 +289,7 @@ class DocxPackageMetadataExtractor : DocxPackageExtractor {
         children: List<MetadataInfo> = emptyList(),
         source: String
     ): DocumentElement.Metadata = DocumentElement.Metadata(
-        MetadataInfo(
+        info = MetadataInfo(
             kind = kind,
             title = title,
             summary = summary,

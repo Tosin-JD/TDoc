@@ -40,7 +40,7 @@ class OdtParagraphParser(
     fun parseHeader(element: Element): DocumentElement.SectionHeader {
         val text = element.textContent.orEmpty().trim()
         val level = element.getAttributeNS(textNs, "outline-level").toIntOrNull() ?: 1
-        return DocumentElement.SectionHeader(text, level)
+        return DocumentElement.SectionHeader(text = text, level = level)
     }
 
     private fun collectSpans(node: Node, output: MutableList<TextSpan>) {
