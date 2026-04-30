@@ -74,13 +74,14 @@ class TextMeasurer(
 
         val text = spans.joinToString("") { it.text }
         if (text.isEmpty()) return null
+        val baseFontSizePt = spans.firstOrNull()?.fontSize?.toFloat() ?: 12f
 
         return buildLayout(
             text = text,
             paint = createTextPaint(spans.first()),
             widthPt = widthPt,
             alignment = alignmentToLayout(style.alignment),
-            lineSpacingPx = unitConverter.ptToPx(style.spacing.line?.toFloat() ?: 0f)
+            lineSpacingPx = resolveLineSpacingPx(style, baseFontSizePt)
         )
     }
 
@@ -183,6 +184,25 @@ class TextMeasurer(
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
             .setIncludePad(true)
             .build()
+    }
+
+    private fun resolveLineSpacingPx(
+        style: ParagraphStyle,
+        baseFontSizePt: Float
+    ): Float {
+        val rawLineSpacing = style.spacing.line ?: return 0f
+        if (rawLineSpacing <= 0) return 0f
+
+        val extraSpacingPt = when {
+            rawLineSpacing >= 120 -> {
+                val targetLineHeightPt = rawLineSpacing / 20f
+                val defaultLineHeightPt = baseFontSizePt * 1.2f
+                (targetLineHeightPt - defaultLineHeightPt).coerceAtLeast(0f)
+            }
+            else -> rawLineSpacing.toFloat()
+        }
+
+        return unitConverter.ptToPx(extraSpacingPt)
     }
 
     fun clearCache() {

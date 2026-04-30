@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Comment
@@ -48,7 +49,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,7 +60,7 @@ import com.tosin.docprocessor.data.common.model.EditorMode
 import com.tosin.docprocessor.data.common.model.ViewMode
 import com.tosin.docprocessor.ui.components.EditorMoreMenu
 import com.tosin.docprocessor.ui.components.EditorToolbar
-import com.tosin.docprocessor.ui.editor.layouts.MobileLayout
+import com.tosin.docprocessor.ui.editor.layouts.mobile.MobileLayoutRenderer
 import com.tosin.docprocessor.ui.editor.layouts.print.PrintLayout
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -84,12 +87,11 @@ fun EditorScreen(
         openDocumentUri?.let { viewModel.onFilePicked(it) }
     }
 
-    LaunchedEffect(viewModel.documentElements.isNotEmpty(), uiState.editorMode) {
+    LaunchedEffect(viewModel.documentElements.isNotEmpty(), uiState.editorMode, viewModel.activeCanvasEditorTarget) {
         if (viewModel.documentElements.isNotEmpty() && uiState.editorMode == EditorMode.EDIT) {
             runCatching { focusRequester.requestFocus() }
         }
     }
-
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -113,7 +115,7 @@ fun EditorScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { /* TODO */ }) {
+                        IconButton(onClick = { }) {
                             Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Comments")
                         }
                         Box {
@@ -133,7 +135,7 @@ fun EditorScreen(
                 )
             } else {
                 TopAppBar(
-                    title = { /* Empty title in edit mode or as needed */ },
+                    title = { },
                     navigationIcon = {
                         IconButton(onClick = { viewModel.toggleEditorMode() }) {
                             Icon(Icons.Default.Check, contentDescription = "Finish Editing", tint = MaterialTheme.colorScheme.primary)
@@ -146,10 +148,10 @@ fun EditorScreen(
                         IconButton(onClick = { viewModel.redo() }) {
                             Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
                         }
-                        IconButton(onClick = { /* TODO: Add element */ }) {
+                        IconButton(onClick = { }) {
                             Icon(Icons.Default.Add, contentDescription = "Add")
                         }
-                        IconButton(onClick = { /* TODO */ }) {
+                        IconButton(onClick = { }) {
                             Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Comments")
                         }
                         Box {
@@ -193,7 +195,7 @@ fun EditorScreen(
                     .fillMaxWidth()
             ) {
                 when (uiState.viewMode) {
-                    ViewMode.MOBILE -> MobileLayout(
+                    ViewMode.MOBILE -> MobileLayoutRenderer(
                         viewModel = viewModel,
                         focusRequester = focusRequester,
                         isEditable = uiState.editorMode == EditorMode.EDIT
@@ -213,14 +215,25 @@ fun EditorScreen(
                         CircularProgressIndicator()
                     }
                 }
+
+                if (uiState.editorMode == EditorMode.EDIT) {
+                    BasicTextField(
+                        value = viewModel.keyboardProxyValue,
+                        onValueChange = viewModel::updateKeyboardProxyValue,
+                        modifier = Modifier
+                            .size(1.dp)
+                            .alpha(0f)
+                            .focusRequester(focusRequester)
+                    )
+                }
             }
 
             if (uiState.editorMode == EditorMode.EDIT) {
                 EditorToolbar(
-                    onBoldClick = { /* TODO */ },
-                    onItalicClick = { /* TODO */ },
-                    onUnderlineClick = { /* TODO */ },
-                    onAlignmentClick = { /* TODO */ },
+                    onBoldClick = { },
+                    onItalicClick = { },
+                    onUnderlineClick = { },
+                    onAlignmentClick = { },
                     onFontFeaturesClick = { showFontSheet = true },
                     modifier = Modifier.imePadding()
                 )

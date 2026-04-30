@@ -30,7 +30,13 @@ import com.tosin.docprocessor.ui.editor.EditorViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private const val PRINT_PREVIEW_SCALE = 0.82f
+private const val PRINT_PREVIEW_SCALE = 1f
+private val PRINT_PREVIEW_DIMENSIONS = PageDimensions.A4.copy(
+    marginLeft = 28f,
+    marginTop = 36f,
+    marginRight = 28f,
+    marginBottom = 36f
+)
 
 @Composable
 fun PrintLayout(
@@ -60,7 +66,7 @@ fun PrintLayout(
         key2 = paginator
     ) {
         value = withContext(Dispatchers.Default) {
-            paginator.paginate(documentData, PageDimensions.A4)
+            paginator.paginate(documentData, PRINT_PREVIEW_DIMENSIONS)
         }
     }
 

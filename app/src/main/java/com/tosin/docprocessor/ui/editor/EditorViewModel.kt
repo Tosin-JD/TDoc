@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tosin.docprocessor.data.common.model.DocumentData
@@ -15,6 +17,8 @@ import com.tosin.docprocessor.data.local.dao.RecentFileDao
 import com.tosin.docprocessor.data.local.entities.RecentFile
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import com.tosin.docprocessor.data.repository.DocumentRepository
+import com.tosin.docprocessor.ui.editor.interaction.CanvasTextHitTarget
+import com.tosin.docprocessor.ui.editor.interaction.EditableElementKind
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -33,7 +37,21 @@ class EditorViewModel @Inject constructor(
     private val recentFileDao: RecentFileDao
 ) : ViewModel() {
 
+    data class ActiveCanvasEditorTarget(
+        val elementId: String,
+        val kind: EditableElementKind,
+        val pageIndex: Int,
+        val text: String,
+        val selection: TextRange
+    )
+
     var documentElements by mutableStateOf<List<DocumentElement>>(emptyList())
+        private set
+
+    var keyboardProxyValue by mutableStateOf(TextFieldValue(""))
+        private set
+
+    var activeCanvasEditorTarget by mutableStateOf<ActiveCanvasEditorTarget?>(null)
         private set
 
     private val _uiState = MutableStateFlow(EditorUiState())
@@ -58,10 +76,15 @@ class EditorViewModel @Inject constructor(
     }
 
     fun toggleEditorMode() {
-        val currentMode = _uiState.value.editorMode
-        _uiState.value = _uiState.value.copy(
-            editorMode = if (currentMode == EditorMode.EDIT) EditorMode.PREVIEW else EditorMode.EDIT
-        )
+        val nextMode = if (_uiState.value.editorMode == EditorMode.EDIT) {
+            EditorMode.PREVIEW
+        } else {
+            EditorMode.EDIT
+        }
+        _uiState.value = _uiState.value.copy(editorMode = nextMode)
+        if (nextMode == EditorMode.PREVIEW) {
+            clearActiveCanvasTextEdit()
+        }
     }
 
     fun toggleStarred() {
@@ -84,6 +107,50 @@ class EditorViewModel @Inject constructor(
         // TODO: Implement redo logic
     }
 
+    fun beginCanvasTextEdit(hitTarget: CanvasTextHitTarget) {
+        if (_uiState.value.editorMode != EditorMode.EDIT) return
+
+        val selection = TextRange(hitTarget.charIndex)
+        activeCanvasEditorTarget = ActiveCanvasEditorTarget(
+            elementId = hitTarget.elementId,
+            kind = hitTarget.kind,
+            pageIndex = hitTarget.pageIndex,
+            text = hitTarget.text,
+            selection = selection
+        )
+        keyboardProxyValue = TextFieldValue(hitTarget.text, selection)
+    }
+
+    fun updateKeyboardProxyValue(newValue: TextFieldValue) {
+        val activeTarget = activeCanvasEditorTarget ?: return
+        keyboardProxyValue = newValue
+
+        if (newValue.text != activeTarget.text) {
+            when (activeTarget.kind) {
+                EditableElementKind.PARAGRAPH -> updateParagraphTextById(activeTarget.elementId, newValue.text)
+                EditableElementKind.SECTION_HEADER -> updateSectionHeaderTextById(activeTarget.elementId, newValue.text)
+            }
+        }
+
+        activeCanvasEditorTarget = activeTarget.copy(
+            text = newValue.text,
+            selection = newValue.selection
+        )
+    }
+
+    fun clearActiveCanvasTextEdit() {
+        activeCanvasEditorTarget = null
+        keyboardProxyValue = TextFieldValue("")
+    }
+
+    fun getEditableTextForElement(elementId: String): String? {
+        return when (val element = documentElements.firstOrNull { it.id == elementId }) {
+            is DocumentElement.Paragraph -> element.spans.joinToString("") { it.text }
+            is DocumentElement.SectionHeader -> element.text
+            else -> null
+        }
+    }
+
     fun onFilePicked(uri: Uri?) {
         uri?.let {
             currentUri = it
@@ -101,6 +168,7 @@ class EditorViewModel @Inject constructor(
                     withContext(Dispatchers.Main) {
                         documentElements = elements
                         _currentDocument.value = document
+                        clearActiveCanvasTextEdit()
                         syncDocumentState(document)
                     }
                     _events.emit("Opened: $fileName")
@@ -118,56 +186,28 @@ class EditorViewModel @Inject constructor(
         currentUri = null
         documentElements = emptyList()
         _currentDocument.value = null
+        clearActiveCanvasTextEdit()
         _uiState.value = EditorUiState()
     }
 
     fun updateParagraph(index: Int, newContent: AnnotatedString) {
         if (_uiState.value.editorMode != EditorMode.EDIT) return
-
-        val currentList = documentElements.toMutableList()
-        if (index in currentList.indices) {
-            val element = currentList[index]
-            if (element is DocumentElement.Paragraph) {
-                currentList[index] = element.copy(
-                    spans = listOf(
-                        TextSpan(
-                            text = newContent.text,
-                            color = element.spans.firstOrNull()?.color ?: "000000"
-                        )
-                    )
-                )
-                documentElements = currentList
-                syncDocumentState()
-            }
-        }
+        val elementId = documentElements.getOrNull(index)?.id ?: return
+        updateParagraphTextById(elementId, newContent.text)
     }
 
     fun updateSectionHeader(index: Int, newText: String) {
         if (_uiState.value.editorMode != EditorMode.EDIT) return
-
-        val currentList = documentElements.toMutableList()
-        if (index in currentList.indices) {
-            val element = currentList[index]
-            if (element is DocumentElement.SectionHeader) {
-                currentList[index] = element.copy(text = newText)
-                documentElements = currentList
-                syncDocumentState()
-            }
-        }
+        val elementId = documentElements.getOrNull(index)?.id ?: return
+        updateSectionHeaderTextById(elementId, newText)
     }
 
     fun updateParagraphById(elementId: String, newContent: AnnotatedString) {
-        val index = documentElements.indexOfFirst { it.id == elementId }
-        if (index >= 0) {
-            updateParagraph(index, newContent)
-        }
+        updateParagraphTextById(elementId, newContent.text)
     }
 
     fun updateSectionHeaderById(elementId: String, newText: String) {
-        val index = documentElements.indexOfFirst { it.id == elementId }
-        if (index >= 0) {
-            updateSectionHeader(index, newText)
-        }
+        updateSectionHeaderTextById(elementId, newText)
     }
 
     fun saveCurrentFile() {
@@ -203,6 +243,7 @@ class EditorViewModel @Inject constructor(
                 .collect { document ->
                     withContext(Dispatchers.Main) {
                         documentElements = document.content
+                        clearActiveCanvasTextEdit()
                     }
                     _currentDocument.value = document
                     syncDocumentState(document)
@@ -243,6 +284,7 @@ class EditorViewModel @Inject constructor(
                 withContext(Dispatchers.Main) {
                     currentUri = it
                     documentElements = emptyList()
+                    clearActiveCanvasTextEdit()
                     syncDocumentState(
                         DocumentData(
                             filename = fileName,
@@ -284,5 +326,40 @@ class EditorViewModel @Inject constructor(
             documentData = updatedDocument,
             errorMessage = null
         )
+    }
+
+    private fun updateParagraphTextById(elementId: String, newText: String) {
+        val index = documentElements.indexOfFirst { it.id == elementId }
+        if (index < 0) return
+
+        val currentList = documentElements.toMutableList()
+        val element = currentList[index] as? DocumentElement.Paragraph ?: return
+        val firstSpan = element.spans.firstOrNull()
+        currentList[index] = element.copy(
+            spans = listOf(
+                TextSpan(
+                    text = newText,
+                    isBold = firstSpan?.isBold ?: false,
+                    isItalic = firstSpan?.isItalic ?: false,
+                    isUnderline = firstSpan?.isUnderline ?: false,
+                    fontFamily = firstSpan?.fontFamily,
+                    fontSize = firstSpan?.fontSize,
+                    color = firstSpan?.color ?: "000000"
+                )
+            )
+        )
+        documentElements = currentList
+        syncDocumentState()
+    }
+
+    private fun updateSectionHeaderTextById(elementId: String, newText: String) {
+        val index = documentElements.indexOfFirst { it.id == elementId }
+        if (index < 0) return
+
+        val currentList = documentElements.toMutableList()
+        val element = currentList[index] as? DocumentElement.SectionHeader ?: return
+        currentList[index] = element.copy(text = newText)
+        documentElements = currentList
+        syncDocumentState()
     }
 }
