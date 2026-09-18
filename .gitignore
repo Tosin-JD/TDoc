@@ -62,3 +62,18 @@ app/build/
 # Test reports
 /test-reports/
 /coverage-reports/
+
+# Android artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
+hs_err_pid*
+replay_pid*
+
+# Misceleneous files
+TODO[0-9]*.md
+TASK[0-9]*.md
+REPORT[0-9]*.md
+IMPLEMENTATION_PLAN[0-9]*.md
