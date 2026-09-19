@@ -17,25 +17,38 @@ class OdtXmlParser(
     private val tableNs = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
     private val drawNs = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
 
-    private lateinit var styleParser: OdtStyleParser
+    private lateinit var styles: MutableMap<String, OdtStyleParser.StyleProperties>
     private lateinit var paragraphParser: OdtParagraphParser
     private lateinit var tableParser: OdtTableParser
     private lateinit var imageParser: OdtImageParser
+    private lateinit var subParser: OdtSubElementParser
 
-    fun parse(contentXmlBytes: ByteArray): List<DocumentElement> {
+    fun parse(contentXmlBytes: ByteArray, stylesXmlBytes: ByteArray? = null): List<DocumentElement> {
         val factory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
         val doc = factory.newDocumentBuilder().parse(ByteArrayInputStream(contentXmlBytes))
         val root = doc.documentElement
 
-        styleParser = OdtStyleParser()
-        val styles = styleParser.parseStyles(root)
-        
+        styles = OdtStyleParser().parseStyles(root).toMutableMap()
+        if (stylesXmlBytes != null) {
+            val stylesDoc = factory.newDocumentBuilder().parse(ByteArrayInputStream(stylesXmlBytes))
+            val stylesRoot = stylesDoc.documentElement
+            val declared = OdtStyleParser().parseStyles(stylesRoot)
+            declared.forEach { (name, props) ->
+                // Automatic styles in content.xml take precedence; declared
+                // styles in styles.xml fill in the gaps.
+                if (!styles.containsKey(name)) {
+                    styles[name] = props
+                }
+            }
+        }
+
         paragraphParser = OdtParagraphParser(styles)
-        tableParser = OdtTableParser()
+        tableParser = OdtTableParser(styles, paragraphParser)
         imageParser = OdtImageParser(cacheDir, zipEntries)
+        subParser = OdtSubElementParser()
 
         val elements = mutableListOf<DocumentElement>()
-        
+
         // Find office:body/office:text
         val bodyNodes = root.getElementsByTagNameNS(officeNs, "body")
         if (bodyNodes.length > 0) {
@@ -55,12 +68,22 @@ class OdtXmlParser(
             val child = children.item(i)
             if (child.nodeType == Node.ELEMENT_NODE) {
                 val element = child as Element
-                when (element.localName) {
+                when (child.localName) {
                     "h" -> output += paragraphParser.parseHeader(element)
                     "p" -> output += paragraphParser.parseParagraph(element)
                     "table" -> output += tableParser.parseTable(element)
                     "frame" -> imageParser.parseImage(element)?.let { output += it }
-                    else -> traverse(child, output) // Recursive for sections/lists etc.
+                    "image" -> imageParser.parseImage(element)?.let { output += it }
+                    "section" -> traverse(child, output) // Section content is transparent for MVP
+                    "list" -> traverse(child, output)    // List items parsed as their paragraphs
+                    else -> {
+                        val subElements = subParser.tryParse(element)
+                        if (subElements == null) {
+                            traverse(child, output)
+                        } else {
+                            output += subElements
+                        }
+                    }
                 }
             }
         }

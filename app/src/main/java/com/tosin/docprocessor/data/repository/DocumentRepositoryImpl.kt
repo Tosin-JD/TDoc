@@ -8,13 +8,12 @@ import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.common.model.MimeTypes
 import com.tosin.docprocessor.data.parser.ParserFactory
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.data.parser.text.PlainTextFlattener
+import com.tosin.docprocessor.model.DocumentMeta
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import org.apache.poi.xwpf.usermodel.XWPFDocument
-import java.io.File
 import javax.inject.Inject
 
 class DocumentRepositoryImpl @Inject constructor(
@@ -22,123 +21,95 @@ class DocumentRepositoryImpl @Inject constructor(
     private val parserFactory: ParserFactory
 ) : DocumentRepository {
 
-    override suspend fun readDocumentFromUri(uri: Uri): List<DocumentElement> {
+    override suspend fun readDocumentFromUri(uri: Uri): DocumentData = withContext(Dispatchers.IO) {
+        val meta = getDocumentMeta(uri)
         val contentResolver = context.contentResolver
-        val fileName = getFileName(uri)
-        val mimeType = contentResolver.getType(uri) ?: MimeTypes.fromExtension(fileName.substringAfterLast('.', "")) ?: ""
-
-        return contentResolver.openInputStream(uri)?.use { inputStream ->
-            parseStream(inputStream, mimeType)
-        } ?: plainTextDocument("Failed to open file")
-    }
-
-    override suspend fun saveDocumentToUri(uri: Uri, content: List<DocumentElement>) {
-        val fileName = getFileName(uri)
-        val mimeType = context.contentResolver.getType(uri)
-            ?: MimeTypes.fromExtension(fileName.substringAfterLast('.', ""))
-            ?: ""
-        context.contentResolver.openOutputStream(uri, "wt")?.use { outputStream ->
-            val parser = parserFactory.createParser(mimeType)
+        val content = contentResolver.openInputStream(uri)?.use { inputStream ->
+            val parser = parserFactory.createParser(meta.mimeType)
+                ?: parserFactory.createParserByName(meta.fileName)
             if (parser != null) {
-                parser.save(outputStream, content).getOrThrow()
+                parser.parse(inputStream).getOrThrow()
             } else {
-                outputStream.bufferedWriter().use { it.write(content.toPlainText()) }
+                val text = inputStream.readBytes().toString(Charsets.UTF_8)
+                listOf(
+                    DocumentElement.Paragraph(
+                        spans = listOf(TextSpan(text = text, color = "000000"))
+                    )
+                )
             }
-        } ?: throw IllegalStateException("Could not open output stream for URI: $uri")
+        } ?: throw IllegalStateException("Failed to open file: $uri")
+
+        DocumentData(
+            id = uri.toString(),
+            filename = meta.fileName,
+            content = content,
+            format = meta.fileName.substringAfterLast('.', "").lowercase()
+        )
     }
 
-    override suspend fun getFileName(uri: Uri): String {
-        var name = ""
+    override suspend fun getDocumentMeta(uri: Uri): DocumentMeta = withContext(Dispatchers.IO) {
+        var fileName = ""
+        var sizeBytes = 0L
         context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (nameIndex != -1 && cursor.moveToFirst()) {
-                name = cursor.getString(nameIndex)
+            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIndex != -1) fileName = cursor.getString(nameIndex) ?: ""
+                if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) sizeBytes = cursor.getLong(sizeIndex)
             }
         }
-        return name
+        val mimeType = context.contentResolver.getType(uri)
+            ?: MimeTypes.fromFileName(fileName)
+            ?: MimeTypes.TXT
+
+        DocumentMeta(
+            uri = uri.toString(),
+            fileName = fileName,
+            mimeType = mimeType,
+            sizeBytes = sizeBytes,
+            lastOpened = System.currentTimeMillis()
+        )
     }
 
-    override fun loadDocument(filePath: String): Flow<DocumentData> = flow {
-        val file = File(filePath)
-        if (!file.exists()) {
-            throw IllegalArgumentException("File not found: $filePath")
-        }
-        val document = parseDocument(filePath)
-        emit(document)
-    }
+    override suspend fun getFileName(uri: Uri): String =
+        getDocumentMeta(uri).fileName
 
-    override fun saveDocument(document: DocumentData): Flow<Unit> = flow {
-        val file = File(document.id.ifEmpty { document.filename })
-        file.outputStream().use { outputStream ->
-            val mimeType = MimeTypes.fromExtension(document.format.lowercase()).orEmpty()
-            val parser = parserFactory.createParser(mimeType)
+    override suspend fun saveDocumentToUri(
+        uri: Uri,
+        content: List<DocumentElement>
+    ): Unit = withContext(Dispatchers.IO) {
+        val meta = getDocumentMeta(uri)
+        val parser = parserFactory.createParser(meta.mimeType)
+            ?: parserFactory.createParserByName(meta.fileName)
+
+        // Serialize fully to memory first so a mid-write failure never corrupts the file.
+        val bytes = ByteArrayOutputStream().use { buffer ->
             if (parser != null) {
-                parser.save(outputStream, document.content).getOrThrow()
+                parser.save(buffer, content).getOrThrow()
             } else {
-                outputStream.bufferedWriter().use { it.write(document.content.toPlainText()) }
-            }
-        }
-        emit(Unit)
-    }
-
-    override suspend fun parseDocument(filePath: String): DocumentData =
-        withContext(Dispatchers.IO) {
-            val file = File(filePath)
-            val fileName = file.name
-            val mimeType = MimeTypes.fromExtension(file.extension).orEmpty()
-            val content = file.inputStream().use { inputStream -> parseStream(inputStream, mimeType) }
-
-            DocumentData(
-                id = file.absolutePath,
-                filename = fileName,
-                content = content,
-                format = file.extension
-            )
-        }
-
-    override suspend fun createNewDocument(uri: Uri) {
-        context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-            // Create a blank Word document structure
-            val doc = XWPFDocument()
-            doc.write(outputStream)
-        }
-    }
-
-    private suspend fun parseStream(
-        inputStream: java.io.InputStream,
-        mimeType: String
-    ): List<DocumentElement> {
-        val parser = parserFactory.createParser(mimeType)
-        return parser?.parse(inputStream)?.getOrThrow()
-            ?: plainTextDocument(inputStream.bufferedReader().use { it.readText() })
-    }
-
-    private fun plainTextDocument(text: String): List<DocumentElement> =
-        listOf(DocumentElement.Paragraph(spans = listOf(TextSpan(text = text, color = "000000"))))
-
-    private fun List<DocumentElement>.toPlainText(): String =
-        joinToString("\n") { element ->
-            when (element) {
-                is DocumentElement.Paragraph -> buildString {
-                    element.listLabel?.let {
-                        append(it)
-                        append(' ')
-                    }
-                    append(element.spans.joinToString("") { it.text })
+                buffer.bufferedWriter(charset = Charsets.UTF_8).use {
+                    it.write(PlainTextFlattener.toPlainText(content))
                 }
-                is DocumentElement.SectionHeader -> element.text
-                is DocumentElement.Section -> element.properties.toString()
-                is DocumentElement.HeaderFooter -> element.content.text
-                is DocumentElement.Note -> element.info.text
-                is DocumentElement.Comment -> element.info.text
-                is DocumentElement.Bookmark -> element.info.name
-                is DocumentElement.Field -> element.info.instruction
-                is DocumentElement.Metadata -> "${element.info.title ?: element.info.kind}: ${element.info.summary}"
-                is DocumentElement.Drawing -> element.info.kind
-                is DocumentElement.EmbeddedObject -> element.info.description ?: element.info.kind
-                is DocumentElement.Table -> element.rows.joinToString("\n") { row -> row.joinToString("\t") }
-                is DocumentElement.Image -> element.caption ?: element.altText.orEmpty()
-                DocumentElement.PageBreak -> ""
+            }
+            buffer.toByteArray()
+        }
+
+        val outputStream = context.contentResolver.openOutputStream(uri, "wt")
+            ?: throw IllegalStateException("Could not open output stream for URI: $uri")
+        outputStream.use { it.write(bytes) }
+    }
+
+    override suspend fun createNewDocument(uri: Uri, fileName: String): Unit =
+        withContext(Dispatchers.IO) {
+            val parser = parserFactory.createParserByName(fileName)
+                ?: throw IllegalArgumentException("Unsupported document format: $fileName")
+            val mimeType = MimeTypes.fromFileName(fileName)
+                ?: throw IllegalArgumentException("Unsupported document format: $fileName")
+
+            val outputStream = context.contentResolver.openOutputStream(uri)
+                ?: throw IllegalStateException("Could not open output stream for URI: $uri")
+            outputStream.use { stream ->
+                parser.createBlankDocument(stream, mimeType).getOrThrow()
             }
         }
 }

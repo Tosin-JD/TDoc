@@ -16,4 +16,13 @@ interface DocumentParser {
      * Encodes the [content] and writes it to the [outputStream].
      */
     suspend fun save(outputStream: OutputStream, content: List<DocumentElement>): Result<Unit>
+
+    /**
+     * Creates an empty document in this format and writes it to the [outputStream].
+     * Used by the "New document" flow so the repository never depends on office libraries.
+     */
+    suspend fun createBlankDocument(
+        outputStream: OutputStream,
+        mimeType: String
+    ): Result<Unit> = Result.failure(UnsupportedOperationException("createBlankDocument not supported for $mimeType"))
 }

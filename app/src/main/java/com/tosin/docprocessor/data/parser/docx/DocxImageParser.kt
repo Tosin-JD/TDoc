@@ -26,9 +26,13 @@ class DocxImageParser(private val cacheDir: File) {
                 output.write(pictureData.data)
             }
 
-            DocumentElement.Image(
+DocumentElement.Image(
                 sourceUri = imageFile.absolutePath,
-                altText = poiPicture.description ?: "Document Image",
+                altText = poiPicture.description
+                    ?.takeUnless { description ->
+                        description.isBlank() || description == poiPicture.pictureData?.fileName
+                    }
+                    ?: "Document Image",
                 caption = null // POI handles captions as separate paragraphs
             )
         } catch (e: Exception) {

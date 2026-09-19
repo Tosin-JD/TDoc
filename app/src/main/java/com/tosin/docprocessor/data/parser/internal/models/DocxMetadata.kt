@@ -32,6 +32,7 @@ data class SectionProperties(
     val sectionIndex: Int,
     val source: String,
     val type: String? = null,
+    val sectionType: SectionType = SectionType.UNKNOWN,
     val pageWidth: Int? = null,
     val pageHeight: Int? = null,
     val margins: EdgeInsets = EdgeInsets(),
@@ -40,6 +41,14 @@ data class SectionProperties(
     val headerReferences: List<HeaderFooterReference> = emptyList(),
     val footerReferences: List<HeaderFooterReference> = emptyList()
 )
+
+enum class SectionType {
+    NEXT_PAGE,
+    CONTINUOUS,
+    EVEN_PAGE,
+    ODD_PAGE,
+    UNKNOWN
+}
 
 data class HeaderFooterReference(
     val relationshipId: String? = null,

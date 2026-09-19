@@ -111,6 +111,18 @@ class DocxParser(
             }
         }
 
+    override suspend fun createBlankDocument(
+        outputStream: OutputStream,
+        mimeType: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            XWPFDocument().use { it.write(outputStream) }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun writeParagraph(document: XWPFDocument, paragraph: DocumentElement.Paragraph) {
         val poiParagraph = document.createParagraph()
         applyParagraphStyle(poiParagraph, paragraph)

@@ -11,6 +11,7 @@ import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterReference
 import com.tosin.docprocessor.data.parser.internal.models.NoteInfo
 import com.tosin.docprocessor.data.parser.internal.models.NoteKind
 import com.tosin.docprocessor.data.parser.internal.models.SectionProperties
+import com.tosin.docprocessor.data.parser.internal.models.SectionType
 import org.apache.poi.xwpf.usermodel.XWPFComment
 import org.apache.poi.xwpf.usermodel.XWPFDocument
 import org.apache.poi.xwpf.usermodel.XWPFEndnote
@@ -87,11 +88,12 @@ class DocxStructureParser(
     }
 
     private fun parseHeadersAndFooters(document: XWPFDocument): List<DocumentElement.HeaderFooter> {
+        val knownTypes = documentCollectReferenceTypes(document)
         val headers = document.headerList.mapIndexed { index, header ->
             DocumentElement.HeaderFooter(
                 header.toContent(
                     kind = HeaderFooterKind.HEADER,
-                    variant = resolveVariant(index, header.text)
+                    variant = resolveVariant(header, index, knownTypes)
                 )
             )
         }
@@ -99,11 +101,60 @@ class DocxStructureParser(
             DocumentElement.HeaderFooter(
                 footer.toContent(
                     kind = HeaderFooterKind.FOOTER,
-                    variant = resolveVariant(index, footer.text)
+                    variant = resolveVariant(footer, index, knownTypes)
                 )
             )
         }
         return headers + footers
+    }
+
+    /**
+     * Collects every header/footer target part name → type mapping declared in
+     * any section's references, so variant resolution matches a header/footer's
+     * part name to "first"/"even"/"default" instead of guessing from text.
+     */
+    private fun documentCollectReferenceTypes(document: XWPFDocument): Map<String, String> {
+        val refs = mutableMapOf<String, String>()
+        fun collect(sectPr: CTSectPr) {
+            (sectPr.headerReferenceList + sectPr.footerReferenceList).forEach { ref ->
+                val id = ref.id ?: return@forEach
+                val target = document.packagePart.getRelationship(id)?.targetURI?.toString()
+                if (target != null) {
+                    refs.putIfAbsent(target, ref.type?.toString().orEmpty())
+                }
+            }
+        }
+        document.paragraphs.forEach { paragraph ->
+            paragraph.ctp.pPr?.sectPr?.let { collect(it) }
+        }
+        document.document.body.sectPr?.let { collect(it) }
+        return refs
+    }
+
+    private fun resolveVariant(
+        headerFooter: XWPFHeaderFooter,
+        index: Int,
+        knownTypes: Map<String, String>
+    ): String {
+        val partName = headerFooter.packagePart.partName.toString()
+        val match = knownTypes[partName]
+        return when (match) {
+            "first" -> "first"
+            "even" -> "even"
+            "default", "" -> "primary"
+            null -> {
+                // No section references this header/footer; fall back to the old
+                // text heuristic and index-based guessing.
+                val lowered = headerFooter.text.lowercase()
+                when {
+                    "first" in lowered -> "first"
+                    "even" in lowered -> "even"
+                    index == 0 -> "primary"
+                    else -> "variant-$index"
+                }
+            }
+            else -> match
+        }
     }
 
     private fun parseFootnotes(document: XWPFDocument): List<DocumentElement.Note> =
@@ -138,6 +189,13 @@ class DocxStructureParser(
             sectionIndex = sectionIndex,
             source = source,
             type = type?.`val`?.toString(),
+            sectionType = when (type?.`val`?.toString()) {
+                "nextPage" -> SectionType.NEXT_PAGE
+                "continuous" -> SectionType.CONTINUOUS
+                "evenPage" -> SectionType.EVEN_PAGE
+                "oddPage" -> SectionType.ODD_PAGE
+                else -> SectionType.UNKNOWN
+            },
             pageWidth = pgSz?.w.asInt(),
             pageHeight = pgSz?.h.asInt(),
             margins = EdgeInsets(

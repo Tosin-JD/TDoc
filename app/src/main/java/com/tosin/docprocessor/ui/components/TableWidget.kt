@@ -10,17 +10,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 
 @Composable
-fun TableWidget(rows: List<List<String>>) {
+fun TableWidget(rows: List<List<String>>, modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
-            .border(1.dp, Color.Gray)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         rows.forEach { row ->
             Row(modifier = Modifier.fillMaxWidth()) {
@@ -28,10 +26,14 @@ fun TableWidget(rows: List<List<String>>) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .border(0.5.dp, Color.LightGray)
+                            .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
                             .padding(8.dp)
                     ) {
-                        Text(text = cellText, style = MaterialTheme.typography.bodySmall, color = Color.Black)
+                        Text(
+                            text = cellText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }

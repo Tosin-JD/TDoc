@@ -16,6 +16,8 @@ class DocxParagraphParser(
         val label = listParser.getListLabel(poiParagraph)
         val listInfo = listParser.parseListInfo(poiParagraph)
         val style = styleParser.parse(poiParagraph)
+        val outlineLevel = poiParagraph.ctp.pPr?.outlineLvl?.`val`?.toInt()
+        val hasOutline = outlineLevel != null && outlineLevel > 0
 
         val spans = poiParagraph.runs.mapNotNull { run ->
             val text = run.text().orEmpty()
@@ -39,7 +41,7 @@ class DocxParagraphParser(
                 characterSpacing = run.characterSpacing.takeIf { it != 0 },
                 language = run.lang,
                 hasShadow = run.isShadowed,
-                hasOutline = false,
+                hasOutline = hasOutline,
                 isEmbossed = run.isEmbossed,
                 isEngraved = run.isImprinted
             )

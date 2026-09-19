@@ -42,12 +42,12 @@ class DocxTableParser(
                 styleId = poiTable.styleID,
                 caption = tablePr?.tblCaption?.`val`,
                 description = tablePr?.tblDescription?.`val`,
-                shadingColor = tablePr?.shd?.fill?.toString(),
+                shadingColor = tablePr?.shd?.fill.asHexColor(),
                 borderSummary = listOfNotNull(
-                    tablePr?.tblBorders?.top?.color?.let { "top:$it" },
-                    tablePr?.tblBorders?.bottom?.color?.let { "bottom:$it" },
-                    tablePr?.tblBorders?.left?.color?.let { "left:$it" },
-                    tablePr?.tblBorders?.right?.color?.let { "right:$it" }
+                    tablePr?.tblBorders?.top?.color.asHexColor()?.let { "top:$it" },
+                    tablePr?.tblBorders?.bottom?.color.asHexColor()?.let { "bottom:$it" },
+                    tablePr?.tblBorders?.left?.color.asHexColor()?.let { "left:$it" },
+                    tablePr?.tblBorders?.right?.color.asHexColor()?.let { "right:$it" }
                 ).takeIf { it.isNotEmpty() }?.joinToString(),
                 cellMargins = EdgeInsets(
                     top = tablePr?.tblCellMar?.top?.w.asInt(),
@@ -66,12 +66,12 @@ class DocxTableParser(
             gridSpan = tcPr?.gridSpan?.`val`.asInt(),
             horizontalMerge = tcPr?.hMerge?.`val`?.toString(),
             verticalMerge = tcPr?.vMerge?.`val`?.toString(),
-            shadingColor = tcPr?.shd?.fill?.toString(),
+            shadingColor = tcPr?.shd?.fill.asHexColor(),
             borderSummary = listOfNotNull(
-                tcPr?.tcBorders?.top?.color?.let { "top:$it" },
-                tcPr?.tcBorders?.bottom?.color?.let { "bottom:$it" },
-                tcPr?.tcBorders?.left?.color?.let { "left:$it" },
-                tcPr?.tcBorders?.right?.color?.let { "right:$it" }
+                tcPr?.tcBorders?.top?.color.asHexColor()?.let { "top:$it" },
+                tcPr?.tcBorders?.bottom?.color.asHexColor()?.let { "bottom:$it" },
+                tcPr?.tcBorders?.left?.color.asHexColor()?.let { "left:$it" },
+                tcPr?.tcBorders?.right?.color.asHexColor()?.let { "right:$it" }
             ).takeIf { it.isNotEmpty() }?.joinToString(),
             margins = EdgeInsets(
                 top = tcPr?.tcMar?.top?.w.asInt(),
@@ -86,5 +86,12 @@ class DocxTableParser(
     private fun Any?.asInt(): Int? = when (this) {
         is Number -> toInt()
         else -> toString().toIntOrNull()
+    }
+
+    /** ST_HexColor is exposed by POI as a byte[] (hexBinary); decode to "RRGGBB". */
+    private fun Any?.asHexColor(): String? = when (this) {
+        is ByteArray -> this.takeIf { it.isNotEmpty() }?.joinToString("") { byte -> "%02X".format(byte.toInt() and 0xFF) }
+        is String -> this.takeIf { it.isNotBlank() }
+        else -> null
     }
 }
