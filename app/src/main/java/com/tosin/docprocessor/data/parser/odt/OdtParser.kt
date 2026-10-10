@@ -43,7 +43,7 @@ class OdtParser(
                 metadataParser.parse(entries["meta.xml"])?.let { elements += it }
 
                 currentElement = "ContentXml"
-                val xmlParser = OdtXmlParser(cacheDir, entries, recoveryStrategy)
+                val xmlParser = OdtXmlParser(cacheDir, entries, entries["styles.xml"], recoveryStrategy)
                 elements += xmlParser.parse(contentXml)
 
                 val validationResult = validator.validate(elements)

@@ -27,6 +27,7 @@ fun EditorMoreMenu(
     uiState: EditorUiState,
     onViewModeChange: (ViewMode) -> Unit,
     onToggleSuggestChanges: () -> Unit,
+    onToggleDarkMode: () -> Unit = {},
     onToggleStarred: () -> Unit,
     onDocumentOutlineClick: () -> Unit = {},
     onFindReplaceClick: () -> Unit = {},
@@ -53,6 +54,22 @@ fun EditorMoreMenu(
                     checked = uiState.viewMode == ViewMode.PRINT,
                     onCheckedChange = { 
                         onViewModeChange(if (it) ViewMode.PRINT else ViewMode.MOBILE)
+                        onDismissRequest()
+                    }
+                )
+            }
+        )
+        DropdownMenuItem(
+            text = { Text("Dark Mode") },
+            onClick = {
+                onToggleDarkMode()
+                onDismissRequest()
+            },
+            trailingIcon = {
+                Switch(
+                    checked = uiState.isDarkMode,
+                    onCheckedChange = {
+                        onToggleDarkMode()
                         onDismissRequest()
                     }
                 )

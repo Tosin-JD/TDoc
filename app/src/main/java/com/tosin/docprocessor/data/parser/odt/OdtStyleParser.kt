@@ -1,8 +1,6 @@
 package com.tosin.docprocessor.data.parser.odt
 
-import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import org.w3c.dom.Element
-import org.w3c.dom.NodeList
 
 class OdtStyleParser {
 
@@ -13,19 +11,21 @@ class OdtStyleParser {
     /**
      * Maps style names to their formatting properties.
      */
-    fun parseStyles(doc: Element): Map<String, StyleProperties> {
+    fun parseStyles(documents: List<Element>): Map<String, StyleProperties> {
         val styles = mutableMapOf<String, StyleProperties>()
-        
-        // Find all <style:style> elements
-        val styleNodes = doc.getElementsByTagNameNS(styleNs, "style")
-        for (i in 0 until styleNodes.length) {
-            val styleElement = styleNodes.item(i) as Element
-            val name = styleElement.getAttributeNS(styleNs, "name")
-            if (name.isNotEmpty()) {
-                styles[name] = parseStyleProperties(styleElement)
+
+        // Common styles live in styles.xml; automatic styles in content.xml
+        // are document-local and deliberately win when names overlap.
+        documents.forEach { doc ->
+            val styleNodes = doc.getElementsByTagNameNS(styleNs, "style")
+            for (i in 0 until styleNodes.length) {
+                val styleElement = styleNodes.item(i) as? Element ?: continue
+                val name = styleElement.getAttributeNS(styleNs, "name")
+                if (name.isNotEmpty()) {
+                    styles[name] = parseStyleProperties(styleElement)
+                }
             }
         }
-        
         return styles
     }
 

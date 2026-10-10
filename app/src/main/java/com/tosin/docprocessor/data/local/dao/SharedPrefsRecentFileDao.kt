@@ -29,6 +29,12 @@ class SharedPrefsRecentFileDao @Inject constructor(
         persist(updatedEntries)
     }
 
+    override suspend fun deleteFile(uri: String) {
+        val updatedEntries = entries.value.filterNot { it.uri == uri }
+        persist(updatedEntries)
+    }
+
+
     override suspend fun pruneOldFiles(): Int {
         val currentEntries = entries.value
         val trimmedEntries = currentEntries

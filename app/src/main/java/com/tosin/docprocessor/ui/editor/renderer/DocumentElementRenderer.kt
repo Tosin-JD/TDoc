@@ -38,12 +38,13 @@ fun DocumentElementRenderer(
     element: DocumentElement,
     index: Int,
     viewModel: EditorViewModel,
-    isEditable: Boolean
+    isEditable: Boolean,
+    isDarkMode: Boolean = false
 ) {
     when (element) {
         is DocumentElement.Paragraph -> {
-            val paragraphText = remember(element.spans, element.listLabel, element.style) {
-                element.toAnnotatedString()
+            val paragraphText = remember(element.spans, element.listLabel, element.style, isDarkMode) {
+                element.toAnnotatedString(isDarkMode)
             }
             if (isEditable) {
                 TextField(
@@ -53,11 +54,7 @@ fun DocumentElementRenderer(
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = if (MaterialTheme.colorScheme.surface == Color.White) {
-                            Color.Black
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        }
+                        color = if (isDarkMode) Color.White else Color.Black
                     ),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
@@ -69,7 +66,9 @@ fun DocumentElementRenderer(
             } else {
                 Text(
                     text = paragraphText,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        color = if (isDarkMode) Color.White else Color.Black
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp)
@@ -78,7 +77,7 @@ fun DocumentElementRenderer(
         }
 
         is DocumentElement.Table -> {
-            TableWidget(rows = element.rows)
+            TableWidget(rows = element.rows, isDarkMode = isDarkMode)
         }
 
         is DocumentElement.Image -> {
@@ -100,18 +99,21 @@ fun DocumentElementRenderer(
                 Text(
                     text = element.caption ?: element.altText ?: "Image unavailable",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray,
+                    color = if (isDarkMode) Color.LightGray else Color.Gray,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             }
         }
 
         is DocumentElement.SectionHeader -> {
-            val textStyle = when (element.level) {
+            val baseStyle = when (element.level) {
                 1 -> MaterialTheme.typography.headlineSmall
                 2 -> MaterialTheme.typography.titleLarge
                 else -> MaterialTheme.typography.titleMedium
             }
+            val textStyle = baseStyle.copy(
+                color = if (isDarkMode) Color.White else Color.Black
+            )
             if (isEditable) {
                 TextField(
                     value = element.text,
@@ -136,28 +138,31 @@ fun DocumentElementRenderer(
             }
         }
 
-        is DocumentElement.Section -> MetadataText(element.properties.toString())
+        is DocumentElement.Section -> MetadataText(element.properties.toString(), isDarkMode)
 
         is DocumentElement.HeaderFooter -> MetadataText(
-            "${element.content.kind.name.lowercase()} (${element.content.variant}): ${element.content.text}"
+            "${element.content.kind.name.lowercase()} (${element.content.variant}): ${element.content.text}",
+            isDarkMode
         )
 
-        is DocumentElement.Note -> MetadataText("${element.info.kind.name.lowercase()}: ${element.info.text}")
+        is DocumentElement.Note -> MetadataText("${element.info.kind.name.lowercase()}: ${element.info.text}", isDarkMode)
 
-        is DocumentElement.Comment -> MetadataText("comment by ${element.info.author ?: "unknown"}: ${element.info.text}")
+        is DocumentElement.Comment -> MetadataText("comment by ${element.info.author ?: "unknown"}: ${element.info.text}", isDarkMode)
 
         is DocumentElement.Bookmark -> MetadataText(
-            "bookmark ${element.info.boundary.name.lowercase()}: ${element.info.name.ifBlank { element.info.id }}"
+            "bookmark ${element.info.boundary.name.lowercase()}: ${element.info.name.ifBlank { element.info.id }}",
+            isDarkMode
         )
 
-        is DocumentElement.Field -> MetadataText("field ${element.info.type}: ${element.info.instruction}")
+        is DocumentElement.Field -> MetadataText("field ${element.info.type}: ${element.info.instruction}", isDarkMode)
 
         is DocumentElement.Metadata -> MetadataText(
             buildString {
                 append(element.info.title ?: element.info.kind)
                 append(": ")
                 append(element.info.summary)
-            }
+            },
+            isDarkMode
         )
 
         is DocumentElement.Drawing -> MetadataText("drawing: ${element.info.kind}")
@@ -173,30 +178,37 @@ fun DocumentElementRenderer(
 }
 
 @Composable
-private fun MetadataText(text: String) {
+private fun MetadataText(text: String, isDarkMode: Boolean = false) {
     Text(
         text = text,
         style = MaterialTheme.typography.bodySmall,
-        color = Color.Gray,
+        color = if (isDarkMode) Color.LightGray else Color.Gray,
         modifier = Modifier.padding(vertical = 4.dp)
     )
 }
 
-private fun DocumentElement.Paragraph.toAnnotatedString(): AnnotatedString = buildAnnotatedString {
+private fun DocumentElement.Paragraph.toAnnotatedString(isDarkMode: Boolean = false): AnnotatedString = buildAnnotatedString {
     pushStyle(style.toComposeParagraphStyle())
     listLabel?.let {
+        pushStyle(SpanStyle(color = if (isDarkMode) Color.White else Color.Black))
         append(it)
         append(" ")
+        pop()
     }
     spans.forEach { span ->
-        pushStyle(span.toSpanStyle())
+        pushStyle(span.toSpanStyle(isDarkMode))
         append(span.text)
         pop()
     }
     pop()
 }
 
-private fun TextSpan.toSpanStyle(): SpanStyle {
+private fun isNearBlack(color: Color): Boolean {
+    // RGB luminance or distance to black
+    return (color.red * 0.299f + color.green * 0.587f + color.blue * 0.114f) < 0.2f
+}
+
+private fun TextSpan.toSpanStyle(isDarkMode: Boolean = false): SpanStyle {
     val parsedColor = runCatching {
         val hex = color.removePrefix("#")
         val argb = when (hex.length) {
@@ -206,6 +218,12 @@ private fun TextSpan.toSpanStyle(): SpanStyle {
         }
         Color(argb)
     }.getOrDefault(Color.Black)
+
+    val finalColor = if (isDarkMode) {
+        if (isNearBlack(parsedColor)) Color.White else parsedColor
+    } else {
+        parsedColor
+    }
 
     return SpanStyle(
         fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
@@ -218,7 +236,7 @@ private fun TextSpan.toSpanStyle(): SpanStyle {
             isStrikethrough -> TextDecoration.LineThrough
             else -> null
         },
-        color = parsedColor,
+        color = finalColor,
         fontSize = fontSize?.sp ?: TextUnit.Unspecified
     )
 }

@@ -41,7 +41,8 @@ fun PageView(
     viewModel: EditorViewModel,
     modifier: Modifier = Modifier,
     isEditable: Boolean = false,
-    scale: Float = 1f
+    scale: Float = 1f,
+    isDarkMode: Boolean = false
 ) {
     val pageAspectRatio = remember(pageModel.dimensions.width, pageModel.dimensions.height) {
         pageModel.dimensions.width / pageModel.dimensions.height
@@ -97,7 +98,7 @@ fun PageView(
                 modifier = Modifier
                     .width(pageWidth)
                     .aspectRatio(pageAspectRatio),
-                color = Color.White,
+                color = if (isDarkMode) Color(0xFF202124) else Color.White,
                 shape = RectangleShape,
                 shadowElevation = 6.dp
             ) {

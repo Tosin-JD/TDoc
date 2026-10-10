@@ -18,7 +18,9 @@ data class TextSpan(
     val hasShadow: Boolean = false,
     val hasOutline: Boolean = false,
     val isEmbossed: Boolean = false,
-    val isEngraved: Boolean = false
+    val isEngraved: Boolean = false,
+    /** Link data is kept on the exact inline range, never inferred from colour. */
+    val hyperlink: HyperlinkInfo? = null
 ) {
     constructor(
         text: String?,

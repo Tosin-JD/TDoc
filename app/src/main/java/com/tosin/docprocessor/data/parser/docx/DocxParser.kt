@@ -5,13 +5,22 @@ import com.tosin.docprocessor.data.parser.DocumentParser
 import com.tosin.docprocessor.data.parser.exception.ParseErrorContext
 import com.tosin.docprocessor.data.parser.exception.ParseException
 import com.tosin.docprocessor.data.parser.internal.models.CommentInfo
+import com.tosin.docprocessor.data.parser.internal.models.BookmarkBoundary
+import com.tosin.docprocessor.data.parser.internal.models.BookmarkInfo
+import com.tosin.docprocessor.data.parser.internal.models.FieldInfo
 import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterContent
+import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterReference
+import com.tosin.docprocessor.data.parser.internal.models.HyperlinkInfo
 import com.tosin.docprocessor.data.parser.internal.models.NoteInfo
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphIndentation
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphSpacing
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
+import com.tosin.docprocessor.data.parser.internal.models.SectionProperties
+import com.tosin.docprocessor.data.parser.internal.models.EdgeInsets
+import com.tosin.docprocessor.data.parser.internal.models.MetadataInfo
 import com.tosin.docprocessor.data.parser.internal.models.TableMetadata
+import com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import com.tosin.docprocessor.data.parser.recovery.GracefulDegradationStrategy
 import com.tosin.docprocessor.data.parser.recovery.RecoveryStrategy
@@ -48,14 +57,13 @@ class DocxParser(
                 val styles = parseStyles(docxPackage.xml("word/styles.xml"))
                 numberingParser.parse(docxPackage.xml("word/numbering.xml"))
                 val relationships = docxPackage.relationshipsFor("word/document.xml")
+                val relationshipDetails = docxPackage.relationshipDetailsFor("word/document.xml")
                 val body = documentXml.documentElement?.firstChild("body")
                     ?: throw IllegalArgumentException("DOCX document is missing body")
 
                 val elements = mutableListOf<DocumentElement>()
+                parseMetadata(docxPackage)?.let(elements::add)
                 
-                val sectPr = body.firstChild("sectPr")
-                sectPr?.let { elements += parseSectionHeadersFooters(it, relationships, docxPackage) }
-
                 // Parse footnotes and endnotes
                 elements += parseNotes(docxPackage.xml("word/footnotes.xml"), com.tosin.docprocessor.data.parser.internal.models.NoteKind.FOOTNOTE)
                 elements += parseNotes(docxPackage.xml("word/endnotes.xml"), com.tosin.docprocessor.data.parser.internal.models.NoteKind.ENDNOTE)
@@ -63,12 +71,25 @@ class DocxParser(
                 // Parse comments
                 elements += parseComments(docxPackage.xml("word/comments.xml"))
 
+                var sectionIndex = 0
                 body.children().forEachIndexed { index, child ->
                     currentElement = "BodyElement[$index]: ${child.nodeName}"
                     try {
                         when {
-                            child.matches("p") -> elements += parseParagraph(child, styles, relationships, docxPackage)
+                            child.matches("p") -> {
+                                elements += parseParagraph(child, styles, relationships, relationshipDetails, docxPackage)
+                                child.firstChild("pPr")?.firstChild("sectPr")?.let { sectionProperties ->
+                                    sectionIndex += 1
+                                    elements += DocumentElement.Section(properties = parseSectionProperties(sectionProperties, sectionIndex))
+                                    elements += parseSectionHeadersFooters(sectionProperties, relationships, docxPackage)
+                                }
+                            }
                             child.matches("tbl") -> parseTable(child)?.let { elements += it }
+                            child.matches("sectPr") -> {
+                                sectionIndex += 1
+                                elements += DocumentElement.Section(properties = parseSectionProperties(child, sectionIndex))
+                                elements += parseSectionHeadersFooters(child, relationships, docxPackage)
+                            }
                         }
                     } catch (error: Exception) {
                         recoveryStrategy.handleFailure(currentElement!!, error) { Unit }
@@ -110,6 +131,7 @@ class DocxParser(
         paragraph: Element,
         styles: Map<String, ParagraphStyle>,
         relationships: Map<String, String>,
+        relationshipDetails: Map<String, DocxPackage.Relationship>,
         docxPackage: DocxPackage
     ): List<DocumentElement> {
         val paragraphStyle = resolveParagraphStyle(paragraph, styles)
@@ -119,10 +141,6 @@ class DocxParser(
         fun flushParagraph() {
             if (spans.isEmpty()) return
             val paragraphText = spans.joinToString("") { it.text }
-            if (paragraphText.isBlank()) {
-                spans.clear()
-                return
-            }
             val snapshot = spans.toList()
             spans.clear()
             
@@ -161,8 +179,9 @@ class DocxParser(
                     spans += runContent.spans
                 }
                 child.matches("hyperlink") -> {
+                    val link = resolveHyperlink(child, relationshipDetails)
                     child.children("r").forEach { run ->
-                        val runContent = parseRun(run)
+                        val runContent = parseRun(run, link)
                         if (runContent.pageBreak) {
                             flushParagraph()
                             elements += DocumentElement.PageBreak()
@@ -174,11 +193,101 @@ class DocxParser(
                         spans += runContent.spans
                     }
                 }
+                child.matches("bookmarkStart") -> {
+                    child.attribute("name")?.takeIf { it.isNotBlank() }?.let { name ->
+                        elements += DocumentElement.Bookmark(
+                            info = BookmarkInfo(
+                                id = child.attribute("id").orEmpty(),
+                                name = name,
+                                boundary = BookmarkBoundary.START,
+                                source = "word/document.xml"
+                            )
+                        )
+                    }
+                }
+                child.matches("bookmarkEnd") -> {
+                    elements += DocumentElement.Bookmark(
+                        info = BookmarkInfo(
+                            id = child.attribute("id").orEmpty(),
+                            name = child.attribute("name").orEmpty(),
+                            boundary = BookmarkBoundary.END,
+                            source = "word/document.xml"
+                        )
+                    )
+                }
+                child.matches("fldSimple") -> {
+                    val instruction = child.attribute("instr").orEmpty()
+                    elements += DocumentElement.Field(
+                        info = FieldInfo(
+                            type = instruction.substringBefore(' ').ifBlank { "simple" },
+                            instruction = instruction,
+                            value = child.descendants("t").joinToString("") { it.textContent.orEmpty() },
+                            isSimpleField = true,
+                            source = "word/document.xml"
+                        )
+                    )
+                }
             }
         }
 
         flushParagraph()
+        // Empty paragraphs are layout-significant in Word documents. Do not
+        // turn a blank line into missing content simply because it has no run.
+        if (elements.isEmpty() && spans.isEmpty()) {
+            elements += DocumentElement.Paragraph(spans = emptyList(), style = paragraphStyle)
+        }
         return elements
+    }
+
+    private fun parseMetadata(docxPackage: DocxPackage): DocumentElement.Metadata? {
+        val core = docxPackage.xml("docProps/core.xml")?.documentElement
+        val app = docxPackage.xml("docProps/app.xml")?.documentElement
+        val custom = docxPackage.xml("docProps/custom.xml")?.documentElement
+        if (core == null && app == null && custom == null) return null
+
+        fun value(root: Element?, name: String): String? = root
+            ?.descendants(name)
+            ?.firstOrNull()
+            ?.textContent
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
+        val attributes = linkedMapOf<String, String>()
+        listOf(
+            "subject", "creator", "lastModifiedBy", "created", "modified", "keywords", "category", "contentStatus"
+        ).forEach { key -> value(core, key)?.let { attributes[key] = it } }
+        listOf("Application", "Pages", "Words", "Characters", "Paragraphs", "Company", "Template").forEach { key ->
+            value(app, key)?.let { attributes[key] = it }
+        }
+        custom?.children("property")?.forEach { property ->
+            val name = property.attribute("name")?.takeIf { it.isNotBlank() } ?: return@forEach
+            property.textContent?.trim()?.takeIf { it.isNotEmpty() }?.let { attributes["custom.$name"] = it }
+        }
+        return DocumentElement.Metadata(
+            info = MetadataInfo(
+                kind = "DOCX Metadata",
+                title = value(core, "title"),
+                summary = value(core, "description") ?: "DOCX document processed via TDoc",
+                attributes = attributes,
+                source = "docProps"
+            )
+        )
+    }
+
+    private fun resolveHyperlink(
+        hyperlink: Element,
+        relationships: Map<String, DocxPackage.Relationship>
+    ): HyperlinkInfo? {
+        val relationship = hyperlink.attribute("id")?.let(relationships::get)
+        val anchor = hyperlink.attribute("anchor")?.takeIf { it.isNotBlank() }
+        val address = relationship?.target?.takeIf { relationship.isExternal }
+        if (address == null && anchor == null) return null
+        return HyperlinkInfo(
+            address = address,
+            anchor = anchor,
+            tooltip = hyperlink.attribute("tooltip")?.takeIf { it.isNotBlank() },
+            docLocation = hyperlink.attribute("docLocation")?.takeIf { it.isNotBlank() }
+        )
     }
 
     private fun parseTable(table: Element): DocumentElement.Table? {
@@ -186,8 +295,18 @@ class DocxParser(
         val tableStyleId = tblPr?.firstChild("tblStyle")?.attribute("val")
         val shadingColor = tblPr?.firstChild("shading")?.attribute("fill")
         
+        val rowMetadata = mutableListOf<List<TableCellMetadata>>()
         val rows = table.children("tr").map { row ->
-            row.children("tc").map { cell ->
+            val cellsMetadata = mutableListOf<TableCellMetadata>()
+            val cells = row.children("tc").map { cell ->
+                val cellProperties = cell.firstChild("tcPr")
+                cellsMetadata += TableCellMetadata(
+                    gridSpan = cellProperties?.firstChild("gridSpan")?.attribute("val")?.toIntOrNull(),
+                    horizontalMerge = cellProperties?.firstChild("hMerge")?.attribute("val"),
+                    verticalMerge = cellProperties?.firstChild("vMerge")?.attribute("val"),
+                    shadingColor = cellProperties?.firstChild("shd")?.attribute("fill"),
+                    nestedTableCount = cell.children("tbl").size
+                )
                 cell.descendants("p")
                     .mapNotNull { paragraph ->
                         val text = paragraph.descendants("t").joinToString("") { it.textContent.orEmpty() }
@@ -199,14 +318,48 @@ class DocxParser(
                     }
                     .joinToString("\n")
             }
+            rowMetadata += cellsMetadata
+            cells
         }.filter { row -> row.isNotEmpty() }
 
         return if (rows.isEmpty()) null else DocumentElement.Table(
             rows = rows,
+            hasHeader = table.children("tr").firstOrNull()
+                ?.firstChild("trPr")?.firstChild("tblHeader") != null,
             metadata = TableMetadata(
                 styleId = tableStyleId,
-                shadingColor = shadingColor
+                shadingColor = shadingColor,
+                rows = rowMetadata
             )
+        )
+    }
+
+    private fun parseSectionProperties(sectPr: Element, sectionIndex: Int): SectionProperties {
+        val pageSize = sectPr.firstChild("pgSz")
+        val pageMargins = sectPr.firstChild("pgMar")
+        val columns = sectPr.firstChild("cols")
+        fun references(tag: String): List<HeaderFooterReference> = sectPr.children(tag).map {
+            HeaderFooterReference(
+                relationshipId = it.attribute("id"),
+                type = it.attribute("type")
+            )
+        }
+        return SectionProperties(
+            sectionIndex = sectionIndex,
+            source = "word/document.xml",
+            type = sectPr.firstChild("type")?.attribute("val"),
+            pageWidth = pageSize?.attribute("w")?.toIntOrNull(),
+            pageHeight = pageSize?.attribute("h")?.toIntOrNull(),
+            margins = EdgeInsets(
+                top = pageMargins?.attribute("top")?.toIntOrNull(),
+                right = pageMargins?.attribute("right")?.toIntOrNull(),
+                bottom = pageMargins?.attribute("bottom")?.toIntOrNull(),
+                left = pageMargins?.attribute("left")?.toIntOrNull()
+            ),
+            columnCount = columns?.attribute("num")?.toIntOrNull(),
+            pageNumberStart = sectPr.firstChild("pgNumType")?.attribute("start")?.toIntOrNull(),
+            headerReferences = references("headerReference"),
+            footerReferences = references("footerReference")
         )
     }
 
@@ -285,7 +438,7 @@ class DocxParser(
         return elements
     }
 
-    private fun parseRun(run: Element): RunContent {
+    private fun parseRun(run: Element, hyperlink: HyperlinkInfo? = null): RunContent {
         val runProperties = run.firstChild("rPr")
         val spans = mutableListOf<TextSpan>()
         val builder = StringBuilder()
@@ -319,7 +472,11 @@ class DocxParser(
                 isSubscript = runProperties?.descendants("vertAlign")?.firstOrNull()?.attribute("val") == "subscript",
                 fontFamily = runProperties?.descendants("rFonts")?.firstOrNull()?.attribute("ascii"),
                 fontSize = runProperties?.descendants("sz")?.firstOrNull()?.attribute("val")?.toIntOrNull()?.div(2),
-                color = runProperties?.descendants("color")?.firstOrNull()?.attribute("val") ?: "000000"
+                color = runProperties?.descendants("color")?.firstOrNull()?.attribute("val") ?: "000000",
+                highlightColor = runProperties?.firstChild("highlight")?.attribute("val"),
+                language = runProperties?.firstChild("lang")?.attribute("val"),
+                characterSpacing = runProperties?.firstChild("spacing")?.attribute("val")?.toIntOrNull(),
+                hyperlink = hyperlink
             )
         }
 
@@ -341,7 +498,8 @@ class DocxParser(
         val bytes = docxPackage.bytes(target) ?: return null
         val fileName = target.substringAfterLast('/')
         val safeName = fileName.ifBlank { "image.bin" }
-        val cachedFile = File(cacheDir, "docx_${System.currentTimeMillis()}_$safeName")
+        val suffix = safeName.substringAfterLast('.', "bin").let { ".${it.take(16)}" }
+        val cachedFile = File.createTempFile("docx_", suffix, cacheDir)
         cachedFile.writeBytes(bytes)
         val docPr = drawing.descendants("docPr").firstOrNull()
         return DocumentElement.Image(

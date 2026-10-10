@@ -48,14 +48,20 @@ class DocumentRepositoryImpl @Inject constructor(
 
     override suspend fun getFileName(uri: Uri): String {
         var name = ""
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (nameIndex != -1 && cursor.moveToFirst()) {
-                name = cursor.getString(nameIndex)
+        runCatching {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1 && cursor.moveToFirst()) {
+                    name = cursor.getString(nameIndex)
+                }
             }
+        }
+        if (name.isBlank()) {
+            name = uri.lastPathSegment?.substringAfterLast('/') ?: "Untitled"
         }
         return name
     }
+
 
     override fun loadDocument(filePath: String): Flow<DocumentData> = flow {
         val file = File(filePath)

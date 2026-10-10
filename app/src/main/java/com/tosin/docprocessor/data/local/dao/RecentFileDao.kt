@@ -8,5 +8,8 @@ interface RecentFileDao {
 
     suspend fun insertFile(file: RecentFile)
 
+    suspend fun deleteFile(uri: String)
+
     suspend fun pruneOldFiles(): Int
 }
+

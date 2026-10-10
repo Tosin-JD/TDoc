@@ -36,7 +36,8 @@ private const val PRINT_PREVIEW_SCALE = 0.82f
 fun PrintLayout(
     viewModel: EditorViewModel,
     focusRequester: FocusRequester,
-    isEditable: Boolean
+    isEditable: Boolean,
+    isDarkMode: Boolean = false
 ) {
     val context = LocalContext.current
     val unitConverter = remember(context) { UnitConverter(context) }
@@ -57,17 +58,20 @@ fun PrintLayout(
     val pages by produceState(
         initialValue = emptyList(),
         key1 = documentData,
-        key2 = paginator
+        key2 = paginator,
+        key3 = isDarkMode
     ) {
         value = withContext(Dispatchers.Default) {
-            paginator.paginate(documentData, PageDimensions.A4)
+            paginator.paginate(documentData, PageDimensions.A4, isDarkMode = isDarkMode)
         }
     }
+
+    val containerBackground = if (isDarkMode) Color(0xFF1E1E1E) else Color(0xFFE4E4E4)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFE4E4E4)),
+            .background(containerBackground),
         contentAlignment = Alignment.TopCenter
     ) {
         LazyColumn(
@@ -86,7 +90,8 @@ fun PrintLayout(
                     unitConverter = unitConverter,
                     viewModel = viewModel,
                     isEditable = isEditable,
-                    scale = PRINT_PREVIEW_SCALE
+                    scale = PRINT_PREVIEW_SCALE,
+                    isDarkMode = isDarkMode
                 )
             }
         }

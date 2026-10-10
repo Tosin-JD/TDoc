@@ -12,5 +12,6 @@ data class EditorUiState(
     val isSaving: Boolean = false,
     val isStarred: Boolean = false,
     val isSuggestChangesEnabled: Boolean = false,
+    val isDarkMode: Boolean = false,
     val errorMessage: String? = null
 )

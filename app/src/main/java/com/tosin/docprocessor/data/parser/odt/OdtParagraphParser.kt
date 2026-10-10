@@ -2,6 +2,7 @@ package com.tosin.docprocessor.data.parser.odt
 
 import com.tosin.docprocessor.data.parser.internal.models.CommentInfo
 import com.tosin.docprocessor.data.parser.internal.models.NoteInfo
+import com.tosin.docprocessor.data.parser.internal.models.HyperlinkInfo
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
@@ -13,7 +14,8 @@ import com.tosin.docprocessor.data.parser.internal.models.ParagraphIndentation
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphSpacing
 
 class OdtParagraphParser(
-    private val styles: Map<String, OdtStyleParser.StyleProperties>
+    private val styles: Map<String, OdtStyleParser.StyleProperties>,
+    private val imageParser: OdtImageParser
 ) {
 
     private val textNs = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
@@ -29,7 +31,7 @@ class OdtParagraphParser(
         
         val paragraph = DocumentElement.Paragraph(
             spans = spans,
-            listLabel = null,
+            listLabel = listItemLabel(element),
             style = ParagraphStyle(
                 alignment = when (properties?.alignment) {
                     "center" -> ParagraphAlignment.CENTER
@@ -47,21 +49,39 @@ class OdtParagraphParser(
         return listOf(paragraph) + extraElements
     }
 
+    private fun listItemLabel(paragraph: Element): String? {
+        val listItem = paragraph.parentNode as? Element ?: return null
+        if (listItem.localName != "list-item" || listItem.namespaceURI != textNs) return null
+        return (0 until listItem.childNodes.length)
+            .asSequence()
+            .mapNotNull { listItem.childNodes.item(it) as? Element }
+            .firstOrNull { it.localName == "list-label" && it.namespaceURI == textNs }
+            ?.textContent
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    }
+
     fun parseHeader(element: Element): DocumentElement.SectionHeader {
         val text = element.textContent.orEmpty().trim()
         val level = element.getAttributeNS(textNs, "outline-level").toIntOrNull() ?: 1
         return DocumentElement.SectionHeader(text = text, level = level)
     }
 
-    private fun collectSpans(node: Node, output: MutableList<TextSpan>, extraElements: MutableList<DocumentElement>) {
+    private fun collectSpans(
+        node: Node,
+        output: MutableList<TextSpan>,
+        extraElements: MutableList<DocumentElement>,
+        inheritedStyle: OdtStyleParser.StyleProperties? = null,
+        hyperlink: HyperlinkInfo? = null
+    ) {
         val children = node.childNodes
         for (i in 0 until children.length) {
             val child = children.item(i)
             when (child.nodeType) {
                 Node.TEXT_NODE -> {
                     val text = child.nodeValue
-                    if (!text.isNullOrBlank()) {
-                        output += TextSpan(text = text)
+                    if (!text.isNullOrEmpty()) {
+                        output += styledSpan(text, inheritedStyle, hyperlink)
                     }
                 }
                 Node.ELEMENT_NODE -> {
@@ -69,31 +89,21 @@ class OdtParagraphParser(
                     when (element.localName) {
                         "span" -> {
                             val styleName = element.getAttributeNS(textNs, "style-name")
-                            val style = styles[styleName]
-                            output += TextSpan(
-                                text = element.textContent,
-                                isBold = style?.isBold ?: false,
-                                isItalic = style?.isItalic ?: false,
-                                isUnderline = style?.isUnderline ?: false,
-                                color = style?.color ?: "000000",
-                                fontSize = style?.fontSize?.toInt() ?: 12
-                            )
+                            collectSpans(element, output, extraElements, styles[styleName] ?: inheritedStyle, hyperlink)
                         }
                         "s" -> {
                             val count = element.getAttributeNS(textNs, "c").toIntOrNull() ?: 1
-                            output += TextSpan(text = " ".repeat(count))
+                            output += styledSpan(" ".repeat(count), inheritedStyle, hyperlink)
                         }
-                        "tab" -> output += TextSpan(text = "\t")
-                        "line-break" -> output += TextSpan(text = "\n")
+                        "tab" -> output += styledSpan("\t", inheritedStyle, hyperlink)
+                        "line-break" -> output += styledSpan("\n", inheritedStyle, hyperlink)
                         "a" -> {
-                            // Hyperlink
                             val href = element.getAttributeNS(xlinkNs, "href")
-                            output += TextSpan(
-                                text = element.textContent,
-                                color = "0000EE",
-                                isUnderline = true
-                                // We could add hyperlink info to TextSpan if it supported it
+                            val link = HyperlinkInfo(
+                                address = href.takeIf { it.isNotBlank() },
+                                tooltip = element.getAttributeNS(xlinkNs, "title").takeIf { it.isNotBlank() }
                             )
+                            collectSpans(element, output, extraElements, inheritedStyle, link)
                         }
                         "footnote", "endnote" -> {
                             val kind = if (element.localName == "footnote") 
@@ -122,10 +132,25 @@ class OdtParagraphParser(
                                 )
                             )
                         }
-                        else -> collectSpans(element, output, extraElements)
+                        "frame" -> imageParser.parseImage(element)?.let(extraElements::add)
+                        else -> collectSpans(element, output, extraElements, inheritedStyle, hyperlink)
                     }
                 }
             }
         }
     }
+
+    private fun styledSpan(
+        text: String,
+        style: OdtStyleParser.StyleProperties?,
+        hyperlink: HyperlinkInfo?
+    ): TextSpan = TextSpan(
+        text = text,
+        isBold = style?.isBold ?: false,
+        isItalic = style?.isItalic ?: false,
+        isUnderline = (style?.isUnderline ?: false) || hyperlink != null,
+        color = style?.color ?: if (hyperlink != null) "0000EE" else "000000",
+        fontSize = style?.fontSize?.toInt(),
+        hyperlink = hyperlink
+    )
 }

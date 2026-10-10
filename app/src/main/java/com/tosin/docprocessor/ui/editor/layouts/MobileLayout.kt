@@ -13,15 +13,21 @@ import com.tosin.docprocessor.ui.editor.EditorViewModel
 import com.tosin.docprocessor.ui.editor.renderer.DocumentElementRenderer
 
 
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+
 @Composable
 fun MobileLayout(
     viewModel: EditorViewModel,
     focusRequester: FocusRequester,
-    isEditable: Boolean
+    isEditable: Boolean,
+    isDarkMode: Boolean = false
 ) {
+    val pageBackground = if (isDarkMode) Color(0xFF2B2B2B) else Color.White
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .background(pageBackground)
             .padding(16.dp)
             .focusRequester(focusRequester)
     ) {
@@ -30,7 +36,8 @@ fun MobileLayout(
                 element = element,
                 index = index,
                 viewModel = viewModel,
-                isEditable = isEditable
+                isEditable = isEditable,
+                isDarkMode = isDarkMode
             )
         }
     }

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -51,11 +52,12 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    recentFileDao: RecentFileDao
+    private val recentFileDao: RecentFileDao
 ) : ViewModel() {
 
     private val preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val query = MutableStateFlow("")
+
     private val sortOption = MutableStateFlow(DocumentSortOption.LAST_OPENED)
     private val layoutMode = MutableStateFlow(DocumentLayoutMode.LIST)
     private val starredUris = MutableStateFlow(loadStarredUris())
@@ -114,6 +116,13 @@ class HomeViewModel @Inject constructor(
         starredUris.value = updated
         preferences.edit().putStringSet(KEY_STARRED_URIS, updated).apply()
     }
+
+    fun removeRecentFile(uri: String) {
+        viewModelScope.launch {
+            recentFileDao.deleteFile(uri)
+        }
+    }
+
 
     private fun loadStarredUris(): Set<String> =
         preferences.getStringSet(KEY_STARRED_URIS, emptySet()).orEmpty()

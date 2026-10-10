@@ -34,6 +34,13 @@ class PrintPaginator(
         data: DocumentData,
         dimensions: PageDimensions,
         startIndex: Int
+    ): List<PageModel> = paginate(data, dimensions, startIndex, isDarkMode = false)
+
+    fun paginate(
+        data: DocumentData,
+        dimensions: PageDimensions,
+        startIndex: Int = 0,
+        isDarkMode: Boolean = false
     ): List<PageModel> {
         if (data.content.isEmpty()) {
             return listOf(createEmptyPage(0, dimensions))
@@ -47,7 +54,8 @@ class PrintPaginator(
                 element = element,
                 elementIndex = startIndex + index,
                 dimensions = dimensions,
-                state = state
+                state = state,
+                isDarkMode = isDarkMode
             )
         }
 
@@ -62,7 +70,8 @@ class PrintPaginator(
         element: DocumentElement,
         elementIndex: Int,
         dimensions: PageDimensions,
-        state: PaginationState
+        state: PaginationState,
+        isDarkMode: Boolean = false
     ) {
         if (flowController.isPageBreak(element)) {
             if (state.currentPageElements.isNotEmpty()) {
@@ -87,7 +96,8 @@ class PrintPaginator(
                     state.currentY,
                     state.currentPageIndex,
                     dimensions,
-                    state.currentPageElements
+                    state.currentPageElements,
+                    isDarkMode
                 )
                 state.currentY += elementHeight
                 pending = null
@@ -100,7 +110,8 @@ class PrintPaginator(
                     state.currentY,
                     state.currentPageIndex,
                     dimensions,
-                    state.currentPageElements
+                    state.currentPageElements,
+                    isDarkMode
                 )
                 state.currentY += elementHeight
                 pending = null
@@ -120,7 +131,8 @@ class PrintPaginator(
                         state.currentY,
                         state.currentPageIndex,
                         dimensions,
-                        state.currentPageElements
+                        state.currentPageElements,
+                        isDarkMode
                     )
                     state.currentY += firstHeight
                 }
@@ -136,7 +148,8 @@ class PrintPaginator(
                             state.currentY,
                             state.currentPageIndex,
                             dimensions,
-                            state.currentPageElements
+                            state.currentPageElements,
+                            isDarkMode
                         )
                         state.currentY += measureElement(pending, dimensions)
                         pending = null
@@ -297,7 +310,8 @@ class PrintPaginator(
         yPositionPt: Float,
         pageIndex: Int,
         dimensions: PageDimensions,
-        pageElements: MutableList<PositionedElement>
+        pageElements: MutableList<PositionedElement>,
+        isDarkMode: Boolean = false
     ) {
         val elementHeight = measureElement(element, dimensions)
         val bounds = RectF(
@@ -314,68 +328,76 @@ class PrintPaginator(
                 pageIndex = pageIndex,
                 bounds = bounds,
                 metadata = mapOf("originalHeight" to elementHeight),
-                layoutResult = createLayoutResult(element, dimensions.printableWidth)
+                layoutResult = createLayoutResult(element, dimensions.printableWidth, isDarkMode)
             )
         )
     }
 
     private fun createLayoutResult(
         element: DocumentElement,
-        widthPt: Float
+        widthPt: Float,
+        isDarkMode: Boolean = false
     ): Any? {
         return when (element) {
             is DocumentElement.Paragraph -> {
-                textMeasurer.buildParagraphLayout(element.spans, element.style, widthPt)
+                textMeasurer.buildParagraphLayout(element.spans, element.style, widthPt, isDarkMode)
             }
             is DocumentElement.SectionHeader -> {
                 textMeasurer.buildPlainTextLayout(
                     text = element.text,
                     fontSize = (12 + (4 - element.level)).toFloat(),
                     isBold = true,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
-            is DocumentElement.Table -> buildTableLayout(element, widthPt)
+            is DocumentElement.Table -> buildTableLayout(element, widthPt, isDarkMode)
             is DocumentElement.Section -> {
                 textMeasurer.buildPlainTextLayout(
                     text = element.properties.toString(),
                     fontSize = 11f,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
             is DocumentElement.HeaderFooter -> {
                 textMeasurer.buildPlainTextLayout(
                     text = "${element.content.kind.name.lowercase()} (${element.content.variant}): ${element.content.text}",
                     fontSize = 10f,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
             is DocumentElement.Note -> {
                 textMeasurer.buildPlainTextLayout(
                     text = "${element.info.kind.name.lowercase()}: ${element.info.text}",
                     fontSize = 10f,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
             is DocumentElement.Comment -> {
                 textMeasurer.buildPlainTextLayout(
                     text = "comment by ${element.info.author ?: "unknown"}: ${element.info.text}",
                     fontSize = 10f,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
             is DocumentElement.Bookmark -> {
                 textMeasurer.buildPlainTextLayout(
                     text = "bookmark ${element.info.boundary.name.lowercase()}: ${element.info.name.ifBlank { element.info.id }}",
                     fontSize = 10f,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
             is DocumentElement.Field -> {
                 textMeasurer.buildPlainTextLayout(
                     text = "field ${element.info.type}: ${element.info.instruction}",
                     fontSize = 10f,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
             is DocumentElement.Metadata -> {
@@ -386,21 +408,24 @@ class PrintPaginator(
                         append(element.info.summary)
                     },
                     fontSize = 10f,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
             is DocumentElement.Drawing -> {
                 textMeasurer.buildPlainTextLayout(
                     text = "drawing: ${element.info.kind}",
                     fontSize = 10f,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
             is DocumentElement.EmbeddedObject -> {
                 textMeasurer.buildPlainTextLayout(
                     text = "embedded object: ${element.info.programId ?: element.info.kind}",
                     fontSize = 10f,
-                    widthPt = widthPt
+                    widthPt = widthPt,
+                    isDarkMode = isDarkMode
                 )
             }
             else -> null
@@ -409,7 +434,8 @@ class PrintPaginator(
 
     private fun buildTableLayout(
         element: DocumentElement.Table,
-        widthPt: Float
+        widthPt: Float,
+        isDarkMode: Boolean = false
     ): TableRenderLayout {
         val columnCount = element.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
         val columnWidthsPt = calculateColumnWidths(element.rows, widthPt, columnCount)
@@ -423,7 +449,8 @@ class PrintPaginator(
                     text = text.ifEmpty { " " },
                     fontSize = 9f,
                     isBold = element.hasHeader && rowIndex == 0,
-                    widthPt = contentWidthPt
+                    widthPt = contentWidthPt,
+                    isDarkMode = isDarkMode
                 )
 
                 TableCellLayout(

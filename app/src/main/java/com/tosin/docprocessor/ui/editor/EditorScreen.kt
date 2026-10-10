@@ -1,6 +1,7 @@
 package com.tosin.docprocessor.ui.editor
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,6 +76,8 @@ fun EditorScreen(
     var showFontSheet by remember { mutableStateOf(false) }
     val fontSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    val context = LocalContext.current
+
     LaunchedEffect(Unit) {
         viewModel.events.collect { message ->
             snackbarHostState.showSnackbar(message)
@@ -80,12 +85,35 @@ fun EditorScreen(
     }
 
     LaunchedEffect(openDocumentUri?.toString()) {
-        openDocumentUri?.let { viewModel.onFilePicked(it) }
+        openDocumentUri?.let { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }.recoverCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            viewModel.onFilePicked(uri)
+        }
     }
+
 
     LaunchedEffect(viewModel.documentElements.isNotEmpty(), uiState.editorMode) {
         if (viewModel.documentElements.isNotEmpty() && uiState.editorMode == EditorMode.EDIT) {
             runCatching { focusRequester.requestFocus() }
+        }
+    }
+
+    BackHandler {
+        if (uiState.editorMode == EditorMode.EDIT) {
+            viewModel.toggleEditorMode()
+        } else {
+            viewModel.closeDocument()
+            onCloseRequest()
         }
     }
 
@@ -125,6 +153,7 @@ fun EditorScreen(
                                 uiState = uiState,
                                 onViewModeChange = viewModel::setViewMode,
                                 onToggleSuggestChanges = viewModel::toggleSuggestChanges,
+                                onToggleDarkMode = viewModel::toggleDarkMode,
                                 onToggleStarred = viewModel::toggleStarred
                             )
                         }
@@ -161,6 +190,7 @@ fun EditorScreen(
                                 uiState = uiState,
                                 onViewModeChange = viewModel::setViewMode,
                                 onToggleSuggestChanges = viewModel::toggleSuggestChanges,
+                                onToggleDarkMode = viewModel::toggleDarkMode,
                                 onToggleStarred = viewModel::toggleStarred
                             )
                         }
@@ -195,12 +225,14 @@ fun EditorScreen(
                     ViewMode.MOBILE -> MobileLayout(
                         viewModel = viewModel,
                         focusRequester = focusRequester,
-                        isEditable = uiState.editorMode == EditorMode.EDIT
+                        isEditable = uiState.editorMode == EditorMode.EDIT,
+                        isDarkMode = uiState.isDarkMode
                     )
                     ViewMode.PRINT -> PrintLayout(
                         viewModel = viewModel,
                         focusRequester = focusRequester,
-                        isEditable = uiState.editorMode == EditorMode.EDIT
+                        isEditable = uiState.editorMode == EditorMode.EDIT,
+                        isDarkMode = uiState.isDarkMode
                     )
                 }
 

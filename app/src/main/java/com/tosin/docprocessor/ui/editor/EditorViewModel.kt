@@ -72,6 +72,10 @@ class EditorViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isSuggestChangesEnabled = !_uiState.value.isSuggestChangesEnabled)
     }
 
+    fun toggleDarkMode() {
+        _uiState.value = _uiState.value.copy(isDarkMode = !_uiState.value.isDarkMode)
+    }
+
     fun updateSearchQuery(query: String) {
         // Implement search logic if needed
     }

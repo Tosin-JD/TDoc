@@ -1,8 +1,7 @@
 package com.tosin.docprocessor.data.parser.odt
 
-import java.io.ByteArrayInputStream
 import java.io.InputStream
-import java.util.zip.ZipInputStream
+import com.tosin.docprocessor.data.parser.util.DefaultZipExtractor
 
 class OdtZipExtractor {
 
@@ -11,17 +10,7 @@ class OdtZipExtractor {
      * This avoids reading the stream multiple times.
      */
     fun extractAllEntries(inputStream: InputStream): Map<String, ByteArray> {
-        val entries = mutableMapOf<String, ByteArray>()
-        ZipInputStream(inputStream).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                if (!entry.isDirectory) {
-                    entries[entry.name] = zip.readBytes()
-                }
-                entry = zip.nextEntry
-            }
-        }
-        return entries
+        return DefaultZipExtractor().extract(inputStream)
     }
 
     fun getEntry(entries: Map<String, ByteArray>, name: String): ByteArray? {

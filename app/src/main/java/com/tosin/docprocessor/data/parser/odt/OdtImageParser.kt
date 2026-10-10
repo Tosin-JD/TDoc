@@ -22,11 +22,20 @@ class OdtImageParser(
         val href = imageElement.getAttributeNS(xlinkNs, "href")
         if (href.isEmpty()) return null
 
-        val bytes = zipEntries[href] ?: return null
+        val bytes = zipEntries[href]
+        if (bytes == null) {
+            // Linked images cannot be copied from the package; retain the
+            // reference so a renderer can surface a recoverable placeholder.
+            return DocumentElement.Image(
+                sourceUri = href,
+                altText = description(element),
+                caption = element.getAttributeNS(drawNs, "name").takeIf { it.isNotBlank() }
+            )
+        }
         
         // Save to cache
-        val fileName = href.substringAfterLast("/")
-        val cacheFile = File(cacheDir, "odt_img_${System.currentTimeMillis()}_$fileName")
+        val suffix = href.substringAfterLast('.', "bin").let { ".${it.take(16)}" }
+        val cacheFile = File.createTempFile("odt_", suffix, cacheDir)
         try {
             FileOutputStream(cacheFile).use { it.write(bytes) }
         } catch (e: Exception) {
@@ -34,12 +43,14 @@ class OdtImageParser(
             return null
         }
 
-        val altText = element.getElementsByTagNameNS(svgNs, "desc").item(0)?.textContent?.trim()
-
         return DocumentElement.Image(
             sourceUri = cacheFile.absolutePath,
-            altText = altText,
-            caption = null
+            altText = description(element),
+            caption = element.getAttributeNS(drawNs, "name").takeIf { it.isNotBlank() }
         )
     }
+
+    private fun description(element: Element): String? =
+        element.getElementsByTagNameNS(svgNs, "desc").item(0)?.textContent?.trim()
+            ?.takeIf { it.isNotEmpty() }
 }

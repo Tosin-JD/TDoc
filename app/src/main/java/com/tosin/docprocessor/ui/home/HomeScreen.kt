@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Download
@@ -111,16 +112,44 @@ fun HomeScreen(
     val createDocLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         onResult = { uri: Uri? -> 
-            uri?.let { onOpenDocument(it) }
+            uri?.let { pickedUri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        pickedUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                }.recoverCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        pickedUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+                onOpenDocument(pickedUri)
+            }
         }
     )
 
     val openDocLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri: Uri? -> 
-            uri?.let { onOpenDocument(it) }
+            uri?.let { pickedUri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        pickedUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                }.recoverCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        pickedUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+                onOpenDocument(pickedUri)
+            }
         }
     )
+
+
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -370,9 +399,15 @@ fun HomeScreen(
                 SheetAction("Rename", Icons.Default.SortByAlpha) {
                     coroutineScope.launch { snackbarHostState.showSnackbar("Rename is coming soon.") }
                 }
+                SheetAction("Remove from recents", Icons.Default.Delete) {
+                    val uriToRemove = item.uri
+                    selectedDocument = null
+                    viewModel.removeRecentFile(uriToRemove)
+                }
             }
         }
     }
+
 
     if (showSortSheet) {
         ModalBottomSheet(

@@ -22,9 +22,10 @@ class TextMeasurer(
     fun measureParagraph(
         spans: List<TextSpan>,
         style: ParagraphStyle,
-        widthPt: Float
+        widthPt: Float,
+        isDarkMode: Boolean = false
     ): Float {
-        val layout = buildParagraphLayout(spans, style, widthPt) ?: return 0f
+        val layout = buildParagraphLayout(spans, style, widthPt, isDarkMode) ?: return 0f
         return unitConverter.pxToPt(layout.height.toFloat())
     }
 
@@ -34,7 +35,8 @@ class TextMeasurer(
         isBold: Boolean = false,
         isItalic: Boolean = false,
         fontFamily: String? = null,
-        widthPt: Float
+        widthPt: Float,
+        isDarkMode: Boolean = false
     ): Float {
         val layout = buildPlainTextLayout(
             text = text,
@@ -42,7 +44,8 @@ class TextMeasurer(
             isBold = isBold,
             isItalic = isItalic,
             fontFamily = fontFamily,
-            widthPt = widthPt
+            widthPt = widthPt,
+            isDarkMode = isDarkMode
         ) ?: return 0f
 
         return unitConverter.pxToPt(layout.height.toFloat())
@@ -52,9 +55,10 @@ class TextMeasurer(
         spans: List<TextSpan>,
         style: ParagraphStyle,
         widthPt: Float,
-        maxHeightPt: Float
+        maxHeightPt: Float,
+        isDarkMode: Boolean = false
     ): Int {
-        val layout = buildParagraphLayout(spans, style, widthPt) ?: return -1
+        val layout = buildParagraphLayout(spans, style, widthPt, isDarkMode) ?: return -1
         val maxHeightPx = unitConverter.ptToPx(maxHeightPt).toInt().coerceAtLeast(0)
         var line = layout.getLineForVertical(maxHeightPx)
 
@@ -68,7 +72,8 @@ class TextMeasurer(
     fun buildParagraphLayout(
         spans: List<TextSpan>,
         style: ParagraphStyle,
-        widthPt: Float
+        widthPt: Float,
+        isDarkMode: Boolean = false
     ): StaticLayout? {
         if (spans.isEmpty()) return null
 
@@ -77,7 +82,7 @@ class TextMeasurer(
 
         return buildLayout(
             text = text,
-            paint = createTextPaint(spans.first()),
+            paint = createTextPaint(spans.first(), isDarkMode),
             widthPt = widthPt,
             alignment = alignmentToLayout(style.alignment),
             lineSpacingPx = unitConverter.ptToPx(style.spacing.line?.toFloat() ?: 0f)
@@ -90,14 +95,16 @@ class TextMeasurer(
         isBold: Boolean = false,
         isItalic: Boolean = false,
         fontFamily: String? = null,
-        widthPt: Float
+        widthPt: Float,
+        isDarkMode: Boolean = false
     ): StaticLayout? {
         if (text.isEmpty()) return null
 
+        val textColor = if (isDarkMode) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
         val paint = TextPaint().apply {
             textSize = unitConverter.ptToPx(fontSize)
             typeface = getTypeface(fontFamily, isBold, isItalic)
-            color = 0xFF000000.toInt()
+            color = textColor
             isAntiAlias = true
             isSubpixelText = true
         }
@@ -118,14 +125,28 @@ class TextMeasurer(
         return if (lineNumber < layout.lineCount) layout.getLineEnd(lineNumber) else layout.text.length
     }
 
-    private fun createTextPaint(span: TextSpan): TextPaint {
-        val cacheKey = "${span.fontFamily}_${span.fontSize}_${span.isBold}_${span.isItalic}_${span.color}"
+    private fun isNearBlack(argb: Int): Boolean {
+        val red = (argb shr 16) and 0xFF
+        val green = (argb shr 8) and 0xFF
+        val blue = argb and 0xFF
+        return (red * 0.299 + green * 0.587 + blue * 0.114) < 50
+    }
+
+    private fun createTextPaint(span: TextSpan, isDarkMode: Boolean = false): TextPaint {
+        val cacheKey = "${span.fontFamily}_${span.fontSize}_${span.isBold}_${span.isItalic}_${span.color}_$isDarkMode"
 
         return textPaintCache.getOrPut(cacheKey) {
+            val parsedColor = parseColorString(span.color)
+            val finalColor = if (isDarkMode) {
+                if (isNearBlack(parsedColor)) 0xFFFFFFFF.toInt() else parsedColor
+            } else {
+                parsedColor
+            }
+
             TextPaint().apply {
                 textSize = unitConverter.ptToPx(span.fontSize?.toFloat() ?: 12f)
                 typeface = getTypeface(span.fontFamily, span.isBold, span.isItalic)
-                color = parseColorString(span.color)
+                color = finalColor
                 isAntiAlias = true
                 isSubpixelText = true
             }

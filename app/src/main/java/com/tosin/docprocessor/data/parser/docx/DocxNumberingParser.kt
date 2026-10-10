@@ -27,6 +27,8 @@ class DocxNumberingParser {
     private val numInstances = mutableMapOf<String, NumInstance>()
 
     fun parse(document: Document?) {
+        abstractNums.clear()
+        numInstances.clear()
         if (document == null) return
         val root = document.documentElement
 

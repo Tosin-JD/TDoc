@@ -3,9 +3,9 @@ package com.tosin.docprocessor.data.parser.docx
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import org.w3c.dom.Node
+import com.tosin.docprocessor.data.parser.util.SecureXml
 import java.io.ByteArrayInputStream
 import java.util.zip.ZipInputStream
-import javax.xml.parsers.DocumentBuilderFactory
 
 class DocxPackage private constructor(
     private val entries: Map<String, ByteArray>
@@ -31,13 +31,7 @@ class DocxPackage private constructor(
 
     fun xml(path: String): Document? {
         val bytes = entries[path] ?: return null
-        return runCatching {
-            DocumentBuilderFactory.newInstance().apply {
-                isNamespaceAware = true
-                isIgnoringComments = true
-                isCoalescing = true
-            }.newDocumentBuilder().parse(ByteArrayInputStream(bytes))
-        }.getOrNull()
+        return runCatching { SecureXml.parse(bytes) }.getOrNull()
     }
 
     fun text(path: String): String? = entries[path]?.decodeToString()
@@ -50,18 +44,36 @@ class DocxPackage private constructor(
             .sorted()
 
     fun relationshipsFor(partPath: String): Map<String, String> {
+        return relationshipDetailsFor(partPath)
+            .filterValues { !it.isExternal }
+            .mapValues { it.value.target }
+    }
+
+    fun relationshipDetailsFor(partPath: String): Map<String, Relationship> {
         val relsPath = relationshipsPathFor(partPath)
         val relsDoc = xml(relsPath) ?: return emptyMap()
         return relsDoc.documentElement
             ?.children("Relationship")
             ?.mapNotNull { rel ->
                 rel.attribute("Id")?.takeIf { it.isNotBlank() }?.let { id ->
-                    id to resolveTarget(partPath, rel.attribute("Target").orEmpty())
+                    val rawTarget = rel.attribute("Target").orEmpty()
+                    val isExternal = rel.attribute("TargetMode")?.equals("External", ignoreCase = true) == true
+                    id to Relationship(
+                        target = if (isExternal) rawTarget else resolveTarget(partPath, rawTarget),
+                        type = rel.attribute("Type"),
+                        isExternal = isExternal
+                    )
                 }
             }
             ?.toMap()
             .orEmpty()
     }
+
+    data class Relationship(
+        val target: String,
+        val type: String?,
+        val isExternal: Boolean
+    )
 
     private fun relationshipsPathFor(partPath: String): String {
         val segments = partPath.split("/")

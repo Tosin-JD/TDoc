@@ -21,7 +21,8 @@ class PrintElementRenderer(
 ) {
     fun DrawScope.render(
         positionedElement: PositionedElement,
-        renderTextContent: Boolean = true
+        renderTextContent: Boolean = true,
+        isDarkMode: Boolean = false
     ) {
         val bounds = positionedElement.bounds
         val x = unitConverter.ptToPx(bounds.left)
@@ -31,10 +32,10 @@ class PrintElementRenderer(
 
         when (val element = positionedElement.element) {
             is DocumentElement.Image -> renderImage(element, x, y, width, height)
-            is DocumentElement.Table -> renderTable(element, positionedElement.layoutResult, x, y, width, height)
+            is DocumentElement.Table -> renderTable(element, positionedElement.layoutResult, x, y, width, height, isDarkMode)
             else -> {
                 if (renderTextContent) {
-                    renderTextOrPlaceholder(positionedElement.layoutResult, x, y, width, height)
+                    renderTextOrPlaceholder(positionedElement.layoutResult, x, y, width, height, isDarkMode)
                 }
             }
         }
@@ -45,7 +46,8 @@ class PrintElementRenderer(
         x: Float,
         y: Float,
         width: Float,
-        height: Float
+        height: Float,
+        isDarkMode: Boolean = false
     ) {
         val layout = layoutResult as? StaticLayout
         if (layout != null) {
@@ -60,7 +62,7 @@ class PrintElementRenderer(
         }
 
         drawRect(
-            color = Color(0x14000000),
+            color = if (isDarkMode) Color(0x33FFFFFF) else Color(0x14000000),
             topLeft = Offset(x, y),
             size = Size(width, height),
             style = Stroke(width = 1f)
@@ -118,21 +120,27 @@ class PrintElementRenderer(
         x: Float,
         y: Float,
         width: Float,
-        height: Float
+        height: Float,
+        isDarkMode: Boolean = false
     ) {
         val tableLayout = layoutResult as? TableRenderLayout
         if (tableLayout == null) {
-            renderTableGridFallback(element, x, y, width, height)
+            renderTableGridFallback(element, x, y, width, height, isDarkMode)
             return
         }
 
+        val tableBgColor = if (isDarkMode) Color(0xFF2B2B2B) else Color.White
+        val headerBgColor = if (isDarkMode) Color(0xFF383838) else Color(0xFFF2F2F2)
+        val outerBorderColor = if (isDarkMode) Color(0xFF888888) else Color(0xFF7F7F7F)
+        val cellBorderColor = if (isDarkMode) Color(0xFF555555) else Color(0xFFB0B0B0)
+
         drawRect(
-            color = Color.White,
+            color = tableBgColor,
             topLeft = Offset(x, y),
             size = Size(width, height)
         )
         drawRect(
-            color = Color(0xFF7F7F7F),
+            color = outerBorderColor,
             topLeft = Offset(x, y),
             size = Size(width, height),
             style = Stroke(width = 1f)
@@ -148,7 +156,7 @@ class PrintElementRenderer(
 
             if (rowLayout.isHeader) {
                 drawRect(
-                    color = Color(0xFFF2F2F2),
+                    color = headerBgColor,
                     topLeft = Offset(x, currentY),
                     size = Size(width, rowHeightPx)
                 )
@@ -166,7 +174,7 @@ class PrintElementRenderer(
                 }
 
                 drawRect(
-                    color = Color(0xFFB0B0B0),
+                    color = cellBorderColor,
                     topLeft = Offset(currentX, currentY),
                     size = Size(cellWidthPx, rowHeightPx),
                     style = Stroke(width = 1f)
@@ -199,20 +207,25 @@ class PrintElementRenderer(
         x: Float,
         y: Float,
         width: Float,
-        height: Float
+        height: Float,
+        isDarkMode: Boolean = false
     ) {
         val rowCount = element.rows.size.coerceAtLeast(1)
         val columnCount = element.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
         val rowHeight = height / rowCount
         val columnWidth = width / columnCount
 
+        val tableBgColor = if (isDarkMode) Color(0xFF2B2B2B) else Color.White
+        val outerBorderColor = if (isDarkMode) Color(0xFF888888) else Color(0xFF7F7F7F)
+        val gridLineColor = if (isDarkMode) Color(0xFF555555) else Color(0xFFB0B0B0)
+
         drawRect(
-            color = Color.White,
+            color = tableBgColor,
             topLeft = Offset(x, y),
             size = Size(width, height)
         )
         drawRect(
-            color = Color(0xFF7F7F7F),
+            color = outerBorderColor,
             topLeft = Offset(x, y),
             size = Size(width, height),
             style = Stroke(width = 1f)
@@ -221,7 +234,7 @@ class PrintElementRenderer(
         for (rowIndex in 1 until rowCount) {
             val lineY = y + (rowHeight * rowIndex)
             drawLine(
-                color = Color(0xFFB0B0B0),
+                color = gridLineColor,
                 start = Offset(x, lineY),
                 end = Offset(x + width, lineY),
                 strokeWidth = 1f
@@ -231,7 +244,7 @@ class PrintElementRenderer(
         for (columnIndex in 1 until columnCount) {
             val lineX = x + (columnWidth * columnIndex)
             drawLine(
-                color = Color(0xFFB0B0B0),
+                color = gridLineColor,
                 start = Offset(lineX, y),
                 end = Offset(lineX, y + height),
                 strokeWidth = 1f

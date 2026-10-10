@@ -2,15 +2,15 @@ package com.tosin.docprocessor.data.parser.odt
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.recovery.GracefulDegradationStrategy
 import com.tosin.docprocessor.data.parser.recovery.RecoveryStrategy
+import com.tosin.docprocessor.data.parser.util.SecureXml
 import org.w3c.dom.Element
 import org.w3c.dom.Node
-import java.io.ByteArrayInputStream
 import java.io.File
-import javax.xml.parsers.DocumentBuilderFactory
 
 class OdtXmlParser(
     private val cacheDir: File,
     private val zipEntries: Map<String, ByteArray>,
+    private val stylesXmlBytes: ByteArray? = null,
     private val recoveryStrategy: RecoveryStrategy = GracefulDegradationStrategy()
 ) {
 
@@ -25,16 +25,19 @@ class OdtXmlParser(
     private lateinit var imageParser: OdtImageParser
 
     fun parse(contentXmlBytes: ByteArray): List<DocumentElement> {
-        val factory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-        val doc = factory.newDocumentBuilder().parse(ByteArrayInputStream(contentXmlBytes))
+        val doc = SecureXml.parse(contentXmlBytes)
         val root = doc.documentElement
 
         styleParser = OdtStyleParser()
-        val styles = styleParser.parseStyles(root)
-        
-        paragraphParser = OdtParagraphParser(styles)
-        tableParser = OdtTableParser(styles)
         imageParser = OdtImageParser(cacheDir, zipEntries)
+        val styleRoots = buildList {
+            stylesXmlBytes?.let { add(SecureXml.parse(it).documentElement) }
+            add(root)
+        }
+        val styles = styleParser.parseStyles(styleRoots)
+
+        paragraphParser = OdtParagraphParser(styles, imageParser)
+        tableParser = OdtTableParser(styles)
 
         val elements = mutableListOf<DocumentElement>()
         
@@ -63,9 +66,10 @@ class OdtXmlParser(
             if (child.nodeType == Node.ELEMENT_NODE) {
                 val element = child as Element
                 try {
-                    when (element.localName) {
-                        "h" -> output += paragraphParser.parseHeader(element)
-                        "p" -> {
+                    when {
+                        element.namespaceURI == textNs && element.localName == "h" ->
+                            output += paragraphParser.parseHeader(element)
+                        element.namespaceURI == textNs && element.localName == "p" -> {
                             val listInfo = if (listContext.depth > 0) {
                                 com.tosin.docprocessor.data.parser.internal.models.ListInfo(
                                     level = listContext.depth - 1,
@@ -74,16 +78,19 @@ class OdtXmlParser(
                             } else null
                             output += paragraphParser.parseParagraph(element, listInfo)
                         }
-                        "table" -> output += tableParser.parseTable(element)
-                        "list" -> {
+                        element.namespaceURI == tableNs && element.localName == "table" ->
+                            output += tableParser.parseTable(element)
+                        element.namespaceURI == textNs && element.localName == "list" -> {
                             val newListContext = listContext.copy(
                                 depth = listContext.depth + 1,
                                 styleName = element.getAttributeNS(textNs, "style-name").takeIf { it.isNotEmpty() } ?: listContext.styleName
                             )
                             traverse(child, output, newListContext)
                         }
-                        "list-item" -> traverse(child, output, listContext)
-                        "frame" -> imageParser.parseImage(element)?.let { output += it }
+                        element.namespaceURI == textNs && element.localName == "list-item" ->
+                            traverse(child, output, listContext)
+                        element.namespaceURI == drawNs && element.localName == "frame" ->
+                            imageParser.parseImage(element)?.let { output += it }
                         else -> traverse(child, output, listContext)
                     }
                 } catch (e: Exception) {

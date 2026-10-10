@@ -14,27 +14,37 @@ class OdtTableParser(
 
     fun parseTable(element: Element): DocumentElement.Table {
         val rows = mutableListOf<List<String>>()
-        
-        val rowNodes = element.getElementsByTagNameNS(tableNs, "table-row")
-        for (i in 0 until rowNodes.length) {
-            val rowElement = rowNodes.item(i) as Element
+        val metadataRows = mutableListOf<List<com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata>>()
+
+        // Only direct rows belong to this table. Descendant queries accidentally
+        // pull rows from nested tables into their parent.
+        directChildren(element, "table-row").forEach { rowElement ->
             val cells = mutableListOf<String>()
-            
-            val cellNodes = rowElement.getElementsByTagNameNS(tableNs, "table-cell")
-            for (j in 0 until cellNodes.length) {
-                val cellElement = cellNodes.item(j) as Element
+            val cellMetadata = mutableListOf<com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata>()
+
+            directChildren(rowElement, null).forEach { cellElement ->
+                if (cellElement.localName == "covered-table-cell") {
+                    cells += ""
+                    cellMetadata += com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata(horizontalMerge = "covered")
+                    return@forEach
+                }
+                if (cellElement.localName != "table-cell") return@forEach
                 val cellText = cellElement.textContent.trim()
-                
-                // Handle column span
                 val span = cellElement.getAttributeNS(tableNs, "number-columns-spanned").toIntOrNull() ?: 1
-                val cellStyleName = cellElement.getAttributeNS(tableNs, "style-name")
-                val cellStyle = styles[cellStyleName]
-                
                 repeat(span) {
                     cells.add(cellText)
+                    cellMetadata += com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata(
+                        gridSpan = span.takeIf { it > 1 },
+                        verticalMerge = cellElement.getAttributeNS(tableNs, "number-rows-spanned").takeIf { it.isNotBlank() },
+                        shadingColor = styles[cellElement.getAttributeNS(tableNs, "style-name")]?.color
+                    )
                 }
             }
-            rows.add(cells)
+            val repeat = rowElement.getAttributeNS(tableNs, "number-rows-repeated").toIntOrNull()?.coerceAtLeast(1) ?: 1
+            repeat(repeat) {
+                rows += cells.toList()
+                metadataRows += cellMetadata.toList()
+            }
         }
 
         val tableStyleName = element.getAttributeNS(tableNs, "style-name")
@@ -49,8 +59,16 @@ class OdtTableParser(
                 caption = null,
                 description = null,
                 borderSummary = null,
-                cellMargins = EdgeInsets()
+                cellMargins = EdgeInsets(),
+                rows = metadataRows
             )
         )
     }
+
+    private fun directChildren(parent: Element, localName: String?): List<Element> =
+        (0 until parent.childNodes.length)
+            .asSequence()
+            .mapNotNull { parent.childNodes.item(it) as? Element }
+            .filter { it.namespaceURI == tableNs && (localName == null || it.localName == localName) }
+            .toList()
 }

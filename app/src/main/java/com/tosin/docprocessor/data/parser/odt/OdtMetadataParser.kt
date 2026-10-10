@@ -2,9 +2,8 @@ package com.tosin.docprocessor.data.parser.odt
 
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.internal.models.MetadataInfo
+import com.tosin.docprocessor.data.parser.util.SecureXml
 import org.w3c.dom.Element
-import java.io.ByteArrayInputStream
-import javax.xml.parsers.DocumentBuilderFactory
 
 class OdtMetadataParser {
 
@@ -17,8 +16,7 @@ class OdtMetadataParser {
         if (metaXmlBytes == null) return null
 
         return try {
-            val factory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-            val doc = factory.newDocumentBuilder().parse(ByteArrayInputStream(metaXmlBytes))
+            val doc = SecureXml.parse(metaXmlBytes)
             val root = doc.documentElement
 
             val attributes = mutableMapOf<String, String>()
@@ -26,7 +24,7 @@ class OdtMetadataParser {
             getElementText(root, "dc", "description")?.let { attributes["description"] = it }
             getElementText(root, "meta", "creation-date")?.let { attributes["createdAt"] = it }
             getElementText(root, "dc", "date")?.let { attributes["modifiedAt"] = it }
-            getElementText(root, "meta", "document-statistic", "meta:word-count")?.let { attributes["wordCount"] = it }
+            getAttribute(root, "meta", "document-statistic", "word-count")?.let { attributes["wordCount"] = it }
 
             val info = MetadataInfo(
                 kind = "ODT Metadata",
@@ -53,5 +51,11 @@ class OdtMetadataParser {
             }
         }
         return null
+    }
+
+    private fun getAttribute(root: Element, prefix: String, localName: String, attributeName: String): String? {
+        val ns = namespaces[prefix] ?: return null
+        val element = root.getElementsByTagNameNS(ns, localName).item(0) as? Element ?: return null
+        return element.getAttributeNS(ns, attributeName).takeIf { it.isNotBlank() }
     }
 }
