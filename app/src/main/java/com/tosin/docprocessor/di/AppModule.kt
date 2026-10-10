@@ -12,6 +12,8 @@ import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 import com.tosin.docprocessor.data.repository.DocumentRepository
 import com.tosin.docprocessor.data.repository.DocumentRepositoryImpl
+import com.tosin.docprocessor.domain.typography.FontFamilyResolver
+import com.tosin.docprocessor.domain.typography.TextFlowResolver
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -29,4 +31,12 @@ object AppModule {
     fun provideRecentFileDao(@ApplicationContext context: Context): RecentFileDao {
         return SharedPrefsRecentFileDao(context)
     }
+
+    @Provides
+    @Singleton
+    fun provideFontFamilyResolver(): FontFamilyResolver = FontFamilyResolver()
+
+    @Provides
+    @Singleton
+    fun provideTextFlowResolver(): TextFlowResolver = TextFlowResolver()
 }

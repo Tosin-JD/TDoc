@@ -13,8 +13,10 @@ class DocumentTextColorResolverTest {
         secondaryText = 0xFFBDBDBD.toInt(),
         tableBackground = 0xFF323232.toInt(),
         tableHeaderBackground = 0xFF3C3C3C.toInt(),
+        tableHeaderText = 0xFFECECEC.toInt(),
         tableBorder = 0xFF9A9A9A.toInt(),
         tableCellBorder = 0xFF5A5A5A.toInt(),
+        tableZebraBackground = 0xFF2E2E2E.toInt(),
         placeholderBackground = 0xFF3A3A3A.toInt(),
         placeholderBorder = 0xFF9A9A9A.toInt()
     )

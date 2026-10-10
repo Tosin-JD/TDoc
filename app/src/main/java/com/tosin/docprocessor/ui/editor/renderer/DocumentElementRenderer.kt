@@ -1,7 +1,5 @@
 package com.tosin.docprocessor.ui.editor.renderer
 
-import android.graphics.BitmapFactory
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,9 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
@@ -32,14 +28,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.TextUnit
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.ui.components.ImageWidget
 import com.tosin.docprocessor.ui.components.TableWidget
 import com.tosin.docprocessor.ui.editor.EditorViewModel
-import java.io.File
 
 @Composable
 fun DocumentElementRenderer(
@@ -51,19 +47,21 @@ fun DocumentElementRenderer(
 ) {
     when (element) {
         is DocumentElement.Paragraph -> {
-            val paragraphText = remember(element.spans, element.listLabel, element.style, isDarkMode) {
-                element.toAnnotatedString(isDarkMode)
+            val textStyleMapper = remember { DocumentTextStyleMapper() }
+            val baseStyle = MaterialTheme.typography.bodyLarge.copy(
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            val textModel = remember(element, baseStyle, isDarkMode) {
+                textStyleMapper.map(element, baseStyle, isDarkMode)
             }
             if (isEditable) {
                 TextField(
-                    value = androidx.compose.ui.text.input.TextFieldValue(paragraphText),
+                    value = androidx.compose.ui.text.input.TextFieldValue(textModel.text),
                     onValueChange = { viewModel.updateParagraph(index, it.annotatedString) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = if (isDarkMode) Color.White else Color.Black
-                    ),
+                    textStyle = textModel.textStyle,
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,
@@ -73,44 +71,32 @@ fun DocumentElementRenderer(
                 )
             } else {
                 Text(
-                    text = paragraphText,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        color = if (isDarkMode) Color.White else Color.Black
-                    ),
+                    text = textModel.text,
+                    style = textModel.textStyle,
+                    textAlign = textModel.textAlign,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp)
+                        .padding(
+                            start = textModel.indentStart,
+                            end = textModel.indentEnd,
+                            top = 4.dp + textModel.spaceBefore,
+                            bottom = 4.dp + textModel.spaceAfter
+                        )
                 )
             }
         }
 
         is DocumentElement.Table -> {
-            TableWidget(rows = element.rows, isDarkMode = isDarkMode)
+            TableWidget(table = element, isDarkMode = isDarkMode)
         }
 
         is DocumentElement.Image -> {
-            val imageBitmap = remember(element.sourceUri) {
-                File(element.sourceUri)
-                    .takeIf { it.exists() }
-                    ?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() }
-            }
-            if (imageBitmap != null) {
-                Image(
-                    bitmap = imageBitmap,
-                    contentDescription = element.altText,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    contentScale = ContentScale.Fit
-                )
-            } else {
-                Text(
-                    text = element.caption ?: element.altText ?: "Image unavailable",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (isDarkMode) Color.LightGray else Color.Gray,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            ImageWidget(
+                sourceUri = element.sourceUri,
+                caption = element.caption,
+                altText = element.altText,
+                isDarkMode = isDarkMode
+            )
         }
 
         is DocumentElement.SectionHeader -> {
@@ -120,7 +106,7 @@ fun DocumentElementRenderer(
                 else -> MaterialTheme.typography.titleMedium
             }
             val textStyle = baseStyle.copy(
-                color = if (isDarkMode) Color.White else Color.Black
+                color = MaterialTheme.colorScheme.onSurface
             )
             if (isEditable) {
                 TextField(
@@ -240,68 +226,3 @@ private fun MetadataText(text: String, isDarkMode: Boolean = false) {
         modifier = Modifier.padding(vertical = 4.dp)
     )
 }
-
-private fun DocumentElement.Paragraph.toAnnotatedString(isDarkMode: Boolean = false): AnnotatedString = buildAnnotatedString {
-    pushStyle(style.toComposeParagraphStyle())
-    listLabel?.let {
-        pushStyle(SpanStyle(color = if (isDarkMode) Color.White else Color.Black))
-        append(it)
-        append(" ")
-        pop()
-    }
-    spans.forEach { span ->
-        pushStyle(span.toSpanStyle(isDarkMode))
-        append(span.text)
-        pop()
-    }
-    pop()
-}
-
-private fun isNearBlack(color: Color): Boolean {
-    // RGB luminance or distance to black
-    return (color.red * 0.299f + color.green * 0.587f + color.blue * 0.114f) < 0.2f
-}
-
-private fun TextSpan.toSpanStyle(isDarkMode: Boolean = false): SpanStyle {
-    val parsedColor = runCatching {
-        val hex = color.removePrefix("#")
-        val argb = when (hex.length) {
-            6 -> (0xFF000000 or hex.toLong(16)).toInt()
-            8 -> hex.toLong(16).toInt()
-            else -> Color.Black.toArgb()
-        }
-        Color(argb)
-    }.getOrDefault(Color.Black)
-
-    val finalColor = if (isDarkMode) {
-        if (isNearBlack(parsedColor)) Color.White else parsedColor
-    } else {
-        parsedColor
-    }
-
-    return SpanStyle(
-        fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
-        fontStyle = if (isItalic) FontStyle.Italic else FontStyle.Normal,
-        textDecoration = when {
-            isUnderline && isStrikethrough -> TextDecoration.combine(
-                listOf(TextDecoration.Underline, TextDecoration.LineThrough)
-            )
-            isUnderline -> TextDecoration.Underline
-            isStrikethrough -> TextDecoration.LineThrough
-            else -> null
-        },
-        color = finalColor,
-        fontSize = fontSize?.sp ?: TextUnit.Unspecified
-    )
-}
-
-private fun com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle.toComposeParagraphStyle():
-    ParagraphStyle = ParagraphStyle(
-    textAlign = when (alignment) {
-        ParagraphAlignment.END -> TextAlign.End
-        ParagraphAlignment.CENTER -> TextAlign.Center
-        ParagraphAlignment.JUSTIFIED -> TextAlign.Justify
-        ParagraphAlignment.DISTRIBUTED -> TextAlign.Justify
-        else -> TextAlign.Start
-    }
-)

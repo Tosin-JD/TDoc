@@ -1,7 +1,6 @@
 package com.tosin.docprocessor.core.rendering
 
 import android.graphics.BitmapFactory
-import android.text.StaticLayout
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -10,9 +9,11 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import com.tosin.docprocessor.core.color.DocumentColorTokens
+import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind
 import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.model.layout.LayoutResult
 import com.tosin.docprocessor.domain.model.layout.PositionedElement
-import com.tosin.docprocessor.domain.model.layout.TableRenderLayout
 import com.tosin.docprocessor.domain.pagination.UnitConverter
 import java.io.File
 
@@ -29,27 +30,35 @@ class PrintElementRenderer(
         val y = unitConverter.ptToPx(bounds.top)
         val width = unitConverter.ptToPx(bounds.width())
         val height = unitConverter.ptToPx(bounds.height())
+        val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
 
         when (val element = positionedElement.element) {
-            is DocumentElement.Image -> renderImage(element, x, y, width, height)
-            is DocumentElement.Table -> renderTable(element, positionedElement.layoutResult, x, y, width, height, isDarkMode)
+            is DocumentElement.Image ->
+                renderImage(element, positionedElement.layoutResult, x, y, width, height, tokens)
+            is DocumentElement.Table ->
+                renderTable(element, positionedElement.layoutResult, x, y, width, height, tokens)
+            is DocumentElement.HeaderFooter -> {
+                if (renderTextContent) {
+                    renderHeaderFooter(element, positionedElement.layoutResult, x, y, width, height, tokens)
+                }
+            }
             else -> {
                 if (renderTextContent) {
-                    renderTextOrPlaceholder(positionedElement.layoutResult, x, y, width, height, isDarkMode)
+                    renderTextOrPlaceholder(positionedElement.layoutResult, x, y, width, height, tokens)
                 }
             }
         }
     }
 
     private fun DrawScope.renderTextOrPlaceholder(
-        layoutResult: Any?,
+        layoutResult: LayoutResult,
         x: Float,
         y: Float,
         width: Float,
         height: Float,
-        isDarkMode: Boolean = false
+        tokens: DocumentColorTokens
     ) {
-        val layout = layoutResult as? StaticLayout
+        val layout = (layoutResult as? LayoutResult.TextLayout)?.layout
         if (layout != null) {
             drawIntoCanvas { canvas ->
                 canvas.nativeCanvas.save()
@@ -62,7 +71,7 @@ class PrintElementRenderer(
         }
 
         drawRect(
-            color = if (isDarkMode) Color(0x33FFFFFF) else Color(0x14000000),
+            color = Color(tokens.placeholderBorder).copy(alpha = 0.15f),
             topLeft = Offset(x, y),
             size = Size(width, height),
             style = Stroke(width = 1f)
@@ -71,41 +80,59 @@ class PrintElementRenderer(
 
     private fun DrawScope.renderImage(
         element: DocumentElement.Image,
+        layoutResult: LayoutResult,
         x: Float,
         y: Float,
         width: Float,
-        height: Float
+        height: Float,
+        tokens: DocumentColorTokens
     ) {
+        val layout = layoutResult as? LayoutResult.ImageLayout
         val bitmap = File(element.sourceUri)
             .takeIf { it.exists() }
             ?.let { BitmapFactory.decodeFile(it.absolutePath) }
 
         if (bitmap != null) {
+            val destWidth = unitConverter.ptToPx(layout?.displayWidthPt ?: width)
+            val destHeight = unitConverter.ptToPx(layout?.displayHeightPt ?: height)
+            val destX = x + (width - destWidth) / 2f
+            val destY = y
+            val destination = android.graphics.RectF(destX, destY, destX + destWidth, destY + destHeight)
+
             drawIntoCanvas { canvas ->
-                val destination = android.graphics.RectF(x, y, x + width, y + height)
                 canvas.nativeCanvas.drawBitmap(bitmap, null, destination, null)
+            }
+
+            if (layout?.captionLayout != null) {
+                drawIntoCanvas { canvas ->
+                    canvas.nativeCanvas.save()
+                    canvas.nativeCanvas.clipRect(x, destY + destHeight, x + width, y + height)
+                    canvas.nativeCanvas.translate(x, destY + destHeight)
+                    layout.captionLayout.draw(canvas.nativeCanvas)
+                    canvas.nativeCanvas.restore()
+                }
             }
         } else {
             drawRect(
-                color = Color(0xFFDADADA),
+                color = Color(tokens.placeholderBackground),
                 topLeft = Offset(x, y),
                 size = Size(width, height)
             )
             drawRect(
-                color = Color(0xFF8A8A8A),
+                color = Color(tokens.placeholderBorder),
                 topLeft = Offset(x, y),
                 size = Size(width, height),
                 style = Stroke(width = 1f)
             )
             drawLine(
-                color = Color(0xFF8A8A8A),
+                color = Color(tokens.placeholderBorder),
                 start = Offset(x, y),
                 end = Offset(x + width, y + height),
                 strokeWidth = 1f,
                 cap = StrokeCap.Round
             )
             drawLine(
-                color = Color(0xFF8A8A8A),
+                color = Color(tokens.placeholderBorder),
                 start = Offset(x + width, y),
                 end = Offset(x, y + height),
                 strokeWidth = 1f,
@@ -114,25 +141,44 @@ class PrintElementRenderer(
         }
     }
 
-    private fun DrawScope.renderTable(
-        element: DocumentElement.Table,
-        layoutResult: Any?,
+    private fun DrawScope.renderHeaderFooter(
+        element: DocumentElement.HeaderFooter,
+        layoutResult: LayoutResult,
         x: Float,
         y: Float,
         width: Float,
         height: Float,
-        isDarkMode: Boolean = false
+        tokens: DocumentColorTokens
     ) {
-        val tableLayout = layoutResult as? TableRenderLayout
+        val separatorColor = Color(tokens.secondaryText).copy(alpha = 0.25f)
+        if (element.content.kind == HeaderFooterKind.HEADER) {
+            drawLine(separatorColor, Offset(x, y + height), Offset(x + width, y + height), strokeWidth = 0.5f)
+        } else {
+            drawLine(separatorColor, Offset(x, y), Offset(x + width, y), strokeWidth = 0.5f)
+        }
+        renderTextOrPlaceholder(layoutResult, x, y, width, height, tokens)
+    }
+
+    private fun DrawScope.renderTable(
+        element: DocumentElement.Table,
+        layoutResult: LayoutResult,
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float,
+        tokens: DocumentColorTokens
+    ) {
+        val tableLayout = (layoutResult as? LayoutResult.TableLayout)?.layout
         if (tableLayout == null) {
-            renderTableGridFallback(element, x, y, width, height, isDarkMode)
+            renderTableGridFallback(element, x, y, width, height, tokens)
             return
         }
 
-        val tableBgColor = if (isDarkMode) Color(0xFF2B2B2B) else Color.White
-        val headerBgColor = if (isDarkMode) Color(0xFF383838) else Color(0xFFF2F2F2)
-        val outerBorderColor = if (isDarkMode) Color(0xFF888888) else Color(0xFF7F7F7F)
-        val cellBorderColor = if (isDarkMode) Color(0xFF555555) else Color(0xFFB0B0B0)
+        val tableBgColor = Color(tokens.tableBackground)
+        val headerBgColor = Color(tokens.tableHeaderBackground)
+        val zebraBgColor = Color(tokens.tableZebraBackground)
+        val outerBorderColor = Color(tokens.tableBorder)
+        val cellBorderColor = Color(tokens.tableCellBorder)
 
         drawRect(
             color = tableBgColor,
@@ -149,14 +195,19 @@ class PrintElementRenderer(
         var currentY = y
         val cellPaddingPx = unitConverter.ptToPx(tableLayout.cellPaddingPt)
 
-        tableLayout.rowLayouts.forEach { rowLayout ->
+        tableLayout.rowLayouts.forEachIndexed { rowIndex, rowLayout ->
             val rowBottom = (currentY + unitConverter.ptToPx(rowLayout.heightPt)).coerceAtMost(y + height)
             val rowHeightPx = (rowBottom - currentY).coerceAtLeast(0f)
-            if (rowHeightPx == 0f) return@forEach
+            if (rowHeightPx == 0f) return@forEachIndexed
 
-            if (rowLayout.isHeader) {
-                drawRect(
+            when {
+                rowLayout.isHeader -> drawRect(
                     color = headerBgColor,
+                    topLeft = Offset(x, currentY),
+                    size = Size(width, rowHeightPx)
+                )
+                rowIndex % 2 == 1 -> drawRect(
+                    color = zebraBgColor,
                     topLeft = Offset(x, currentY),
                     size = Size(width, rowHeightPx)
                 )
@@ -208,22 +259,30 @@ class PrintElementRenderer(
         y: Float,
         width: Float,
         height: Float,
-        isDarkMode: Boolean = false
+        tokens: DocumentColorTokens
     ) {
         val rowCount = element.rows.size.coerceAtLeast(1)
         val columnCount = element.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
         val rowHeight = height / rowCount
         val columnWidth = width / columnCount
 
-        val tableBgColor = if (isDarkMode) Color(0xFF2B2B2B) else Color.White
-        val outerBorderColor = if (isDarkMode) Color(0xFF888888) else Color(0xFF7F7F7F)
-        val gridLineColor = if (isDarkMode) Color(0xFF555555) else Color(0xFFB0B0B0)
+        val tableBgColor = Color(tokens.tableBackground)
+        val headerBgColor = Color(tokens.tableHeaderBackground)
+        val outerBorderColor = Color(tokens.tableBorder)
+        val gridLineColor = Color(tokens.tableCellBorder)
 
         drawRect(
             color = tableBgColor,
             topLeft = Offset(x, y),
             size = Size(width, height)
         )
+        if (element.hasHeader && rowCount > 0) {
+            drawRect(
+                color = headerBgColor,
+                topLeft = Offset(x, y),
+                size = Size(width, rowHeight)
+            )
+        }
         drawRect(
             color = outerBorderColor,
             topLeft = Offset(x, y),

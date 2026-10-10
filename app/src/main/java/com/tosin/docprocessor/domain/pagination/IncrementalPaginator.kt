@@ -26,8 +26,12 @@ class IncrementalPaginator(
     private val textMeasurer: TextMeasurer,
     private val unitConverter: UnitConverter,
     private val registry: LayoutRegistry,
-    private val flowController: FlowController
+    private val flowController: FlowController,
+    private val imageDimensionsProvider: ImageDimensionsProvider,
+    private val imageLayoutConfig: ImageLayoutConfig = ImageLayoutConfig.Default
 ) : Paginator {
+
+    private val indentationResolver = IndentationResolver()
 
     /**
      * Perform an incremental update on existing pagination.
@@ -189,7 +193,8 @@ class IncrementalPaginator(
     private fun measureElement(element: DocumentElement, dimensions: PageDimensions): Float {
         return when (element) {
             is DocumentElement.Paragraph -> {
-                textMeasurer.measureParagraph(element.spans, element.style, dimensions.printableWidth)
+                val indent = indentationResolver.resolve(element.style.indentation, element.listInfo)
+                textMeasurer.measureParagraph(element.spans, element.style, dimensions.printableWidth, indent)
             }
             is DocumentElement.SectionHeader -> {
                 textMeasurer.measurePlainText(
@@ -203,7 +208,15 @@ class IncrementalPaginator(
                 (element.rows.size * 20f).coerceAtLeast(40f)
             }
             is DocumentElement.Image -> {
-                200f
+                val intrinsic = imageDimensionsProvider.intrinsicPoints(element.sourceUri)
+                val scaled = ImageScaleCalculator.scale(
+                    intrinsicWidth = intrinsic?.widthPt,
+                    intrinsicHeight = intrinsic?.heightPt,
+                    availableWidth = dimensions.printableWidth,
+                    maxHeight = dimensions.bodyHeight * imageLayoutConfig.maxHeightFraction,
+                    fallbackHeight = imageLayoutConfig.fallbackHeightPt
+                )
+                scaled.displayHeight
             }
             is DocumentElement.PageBreak -> {
                 0f

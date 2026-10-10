@@ -11,6 +11,7 @@ import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind
 import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterReference
 import com.tosin.docprocessor.data.parser.internal.models.HyperlinkInfo
 import com.tosin.docprocessor.data.parser.internal.models.ListInfo
+import com.tosin.docprocessor.data.parser.internal.models.LineSpacingRule
 import com.tosin.docprocessor.data.parser.internal.models.MetadataInfo
 import com.tosin.docprocessor.data.parser.internal.models.NoteInfo
 import com.tosin.docprocessor.data.parser.internal.models.NoteKind
@@ -193,7 +194,8 @@ class LegacyElementAdapter {
                 spacing = ParagraphSpacing(
                     before = style.spaceBeforePoints?.times(20)?.toInt(),
                     after = style.spaceAfterPoints?.times(20)?.toInt(),
-                    line = style.lineSpacing?.times(20)?.toInt()
+                    line = style.toLegacySpacingLine(),
+                    lineRule = style.toLegacySpacingRule()
                 ),
                 outlineLevel = style.outlineLevel,
                 isHeading = false,
@@ -419,6 +421,23 @@ class LegacyElementAdapter {
         TextAlignment.CENTER -> ParagraphAlignment.CENTER
         TextAlignment.JUSTIFIED -> ParagraphAlignment.JUSTIFIED
         TextAlignment.DISTRIBUTED -> ParagraphAlignment.DISTRIBUTED
+    }
+
+    private fun com.tosin.docprocessor.domain.document.model.style.ParagraphStyle.toLegacySpacingRule(): LineSpacingRule? {
+        if (lineSpacing == null) return null
+        return when (lineSpacingRule?.lowercase()) {
+            "auto" -> LineSpacingRule.AUTO
+            "atleast" -> LineSpacingRule.AT_LEAST
+            else -> LineSpacingRule.EXACT
+        }
+    }
+
+    private fun com.tosin.docprocessor.domain.document.model.style.ParagraphStyle.toLegacySpacingLine(): Int? {
+        val value = lineSpacing ?: return null
+        return when (toLegacySpacingRule()) {
+            LineSpacingRule.AUTO -> Math.round(value * 240.0).toInt()
+            else -> Math.round(value * 20.0).toInt()
+        }
     }
 
     private fun com.tosin.docprocessor.domain.document.model.NoteKind.toLegacy(): NoteKind =

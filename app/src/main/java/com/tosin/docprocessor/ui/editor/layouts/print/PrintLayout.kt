@@ -18,12 +18,15 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.tosin.docprocessor.core.rendering.BitmapImageDimensionsProvider
 import com.tosin.docprocessor.core.rendering.PrintElementRenderer
 import com.tosin.docprocessor.domain.model.DocumentData
+import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.layout.PageDimensions
 import com.tosin.docprocessor.domain.pagination.FlowController
 import com.tosin.docprocessor.domain.pagination.LayoutRegistry
 import com.tosin.docprocessor.domain.pagination.PrintPaginator
+import com.tosin.docprocessor.domain.pagination.SectionResolver
 import com.tosin.docprocessor.domain.pagination.TextMeasurer
 import com.tosin.docprocessor.domain.pagination.UnitConverter
 import com.tosin.docprocessor.ui.editor.EditorViewModel
@@ -44,10 +47,16 @@ fun PrintLayout(
     val textMeasurer = remember(context, unitConverter) { TextMeasurer(context, unitConverter) }
     val layoutRegistry = remember { LayoutRegistry() }
     val flowController = remember(textMeasurer, unitConverter) { FlowController(textMeasurer, unitConverter) }
-    val paginator = remember(textMeasurer, unitConverter, layoutRegistry, flowController) {
-        PrintPaginator(textMeasurer, unitConverter, layoutRegistry, flowController)
+    val imageDimensionsProvider = remember { BitmapImageDimensionsProvider() }
+    val paginator = remember(
+        textMeasurer, unitConverter, layoutRegistry, flowController, imageDimensionsProvider
+    ) {
+        PrintPaginator(
+            textMeasurer, unitConverter, layoutRegistry, flowController, imageDimensionsProvider
+        )
     }
     val renderer = remember(unitConverter) { PrintElementRenderer(unitConverter) }
+    val sectionResolver = remember { SectionResolver() }
 
     val currentDocument by viewModel.currentDocument.collectAsState()
     val documentData = remember(currentDocument, viewModel.documentElements) {
@@ -62,7 +71,13 @@ fun PrintLayout(
         key3 = isDarkMode
     ) {
         value = withContext(Dispatchers.Default) {
-            paginator.paginate(documentData, PageDimensions.A4, isDarkMode = isDarkMode)
+            val defaultDimensions = documentData.content
+                .filterIsInstance<DocumentElement.Section>()
+                .firstOrNull()
+                ?.let { sectionResolver.resolve(it.properties) }
+                ?: PageDimensions.A4
+
+            paginator.paginate(documentData, defaultDimensions, isDarkMode = isDarkMode)
         }
     }
 

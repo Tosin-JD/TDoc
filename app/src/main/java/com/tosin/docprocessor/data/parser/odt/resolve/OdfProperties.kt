@@ -98,6 +98,7 @@ object OdfParagraphProperties {
             spaceBeforePoints = Units.parseOdfLength(props.attrNs(Ns.FO, "margin-top")),
             spaceAfterPoints = Units.parseOdfLength(props.attrNs(Ns.FO, "margin-bottom")),
             lineSpacing = lineSpacing(props.attrNs(Ns.FO, "line-height")),
+            lineSpacingRule = lineSpacingRule(props.attrNs(Ns.FO, "line-height")),
             keepNext = boolean(props.attrNs(Ns.FO, "keep-with-next")),
             pageBreakBefore = props.attrNs(Ns.FO, "break-before")?.contains("page") == true,
             shading = props.attrNs(Ns.FO, "background-color")?.let { Shading(fill = it) },
@@ -118,6 +119,12 @@ object OdfParagraphProperties {
         val raw = value?.trim() ?: return null
         return if (raw.endsWith("%")) raw.dropLast(1).toDoubleOrNull()?.div(100.0)
         else Units.parseOdfLength(raw)
+    }
+
+    private fun lineSpacingRule(value: String?): String? {
+        val raw = value?.trim()?.lowercase() ?: return null
+        if (raw.isEmpty() || raw == "normal") return null
+        return if (raw.endsWith("%") || raw.toDoubleOrNull() != null) "auto" else "exact"
     }
 
     private fun boolean(value: String?): Boolean? = when (value?.lowercase()) {

@@ -3,6 +3,9 @@ package com.tosin.docprocessor.domain.pagination
 import android.graphics.RectF
 import com.tosin.docprocessor.domain.model.DocumentData
 import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.model.layout.ElementIndentation
+import com.tosin.docprocessor.domain.model.layout.LayoutRect
+import com.tosin.docprocessor.domain.model.layout.LayoutResult
 import com.tosin.docprocessor.domain.model.layout.PageDimensions
 import com.tosin.docprocessor.domain.model.layout.PageModel
 import com.tosin.docprocessor.domain.model.layout.PageState
@@ -10,6 +13,7 @@ import com.tosin.docprocessor.domain.model.layout.PositionedElement
 import com.tosin.docprocessor.domain.model.layout.TableCellLayout
 import com.tosin.docprocessor.domain.model.layout.TableRenderLayout
 import com.tosin.docprocessor.domain.model.layout.TableRowLayout
+import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import kotlin.math.ceil
 
@@ -17,17 +21,27 @@ class PrintPaginator(
     private val textMeasurer: TextMeasurer,
     private val unitConverter: UnitConverter,
     private val registry: LayoutRegistry,
-    private val flowController: FlowController
+    private val flowController: FlowController,
+    private val imageDimensionsProvider: ImageDimensionsProvider,
+    private val imageLayoutConfig: ImageLayoutConfig = ImageLayoutConfig.Default
 ) : Paginator {
     private val tableCellPaddingPt = 4f
     private val minTableColumnWidthPt = 48f
     private val maxTableColumnWeight = 8f
 
+    private val sectionResolver = SectionResolver()
+    private val indentationResolver = IndentationResolver()
+    private val spacingResolver = SpacingResolver()
+
+    private val measuredImageLayouts = mutableMapOf<String, LayoutResult.ImageLayout>()
+
     private data class PaginationState(
         var currentPageIndex: Int = 0,
         var currentY: Float = 0f,
+        var currentDimensions: PageDimensions = PageDimensions(),
         var currentPageElements: MutableList<PositionedElement> = mutableListOf(),
-        val pages: MutableList<PageModel> = mutableListOf()
+        val pages: MutableList<PageModel> = mutableListOf(),
+        val sectionStartPages: MutableSet<Int> = mutableSetOf(0)
     )
 
     override fun paginate(
@@ -42,28 +56,136 @@ class PrintPaginator(
         startIndex: Int = 0,
         isDarkMode: Boolean = false
     ): List<PageModel> {
-        if (data.content.isEmpty()) {
-            return listOf(createEmptyPage(0, dimensions))
+        val headerFooterElements = data.content.filterIsInstance<DocumentElement.HeaderFooter>()
+        val headers = headerFooterElements.filter { it.content.kind == HeaderFooterKind.HEADER }
+        val footers = headerFooterElements.filter { it.content.kind == HeaderFooterKind.FOOTER }
+
+        val baseDimensions = applyHeaderFooterReservation(dimensions, headers, footers)
+
+        val elementsToProcess = data.content
+            .drop(startIndex)
+            .filter { it !is DocumentElement.HeaderFooter }
+
+        measuredImageLayouts.clear()
+
+        if (elementsToProcess.isEmpty()) {
+            val page = createEmptyPage(0, baseDimensions)
+            return listOf(attachHeaderFooter(page, headers, footers, setOf(0), isDarkMode))
         }
 
-        val state = PaginationState(currentY = dimensions.marginTop)
-        val elementsToProcess = data.content.drop(startIndex)
+        val state = PaginationState(
+            currentY = baseDimensions.bodyTop,
+            currentDimensions = baseDimensions
+        )
 
         for ((index, element) in elementsToProcess.withIndex()) {
+            if (element is DocumentElement.Section) {
+                val newDimensions = applyHeaderFooterReservation(
+                    sectionResolver.resolve(element.properties),
+                    headers,
+                    footers
+                )
+                if (state.currentPageElements.isNotEmpty()) {
+                    state.pages.add(
+                        createPage(state.currentPageIndex, state.currentPageElements, state.currentDimensions)
+                    )
+                    state.currentPageElements = mutableListOf()
+                    state.currentPageIndex++
+                }
+                state.currentDimensions = newDimensions
+                state.currentY = newDimensions.bodyTop
+                state.sectionStartPages.add(state.currentPageIndex)
+                continue
+            }
+
             paginateElement(
                 element = element,
                 elementIndex = startIndex + index,
-                dimensions = dimensions,
+                dimensions = state.currentDimensions,
                 state = state,
                 isDarkMode = isDarkMode
             )
         }
 
         if (state.currentPageElements.isNotEmpty()) {
-            state.pages.add(createPage(state.currentPageIndex, state.currentPageElements, dimensions))
+            state.pages.add(
+                createPage(state.currentPageIndex, state.currentPageElements, state.currentDimensions)
+            )
         }
 
-        return state.pages
+        return state.pages.map { page ->
+            attachHeaderFooter(page, headers, footers, state.sectionStartPages, isDarkMode)
+        }
+    }
+
+    private fun applyHeaderFooterReservation(
+        dimensions: PageDimensions,
+        headers: List<DocumentElement.HeaderFooter>,
+        footers: List<DocumentElement.HeaderFooter>
+    ): PageDimensions {
+        if (headers.isEmpty() && footers.isEmpty()) return dimensions
+
+        val headerHeightPt = headers.firstOrNull()?.let {
+            textMeasurer.measurePlainText(it.content.text, fontSize = 10f, widthPt = dimensions.printableWidth)
+        } ?: 0f
+        val footerHeightPt = footers.firstOrNull()?.let {
+            textMeasurer.measurePlainText(it.content.text, fontSize = 10f, widthPt = dimensions.printableWidth)
+        } ?: 0f
+
+        return dimensions.copy(headerHeight = headerHeightPt, footerHeight = footerHeightPt)
+    }
+
+    private fun attachHeaderFooter(
+        page: PageModel,
+        headers: List<DocumentElement.HeaderFooter>,
+        footers: List<DocumentElement.HeaderFooter>,
+        sectionStartPages: Set<Int>,
+        isDarkMode: Boolean
+    ): PageModel {
+        if (headers.isEmpty() && footers.isEmpty()) return page
+
+        val isFirstPageOfSection = page.index in sectionStartPages
+        val header = resolveHeaderForPage(headers, page.index, isFirstPageOfSection)
+        val footer = resolveHeaderForPage(footers, page.index, isFirstPageOfSection)
+
+        return page.copy(
+            headerElements = header?.let {
+                listOf(createHeaderFooterElement(it, page.dimensions.headerRect, page.index, isDarkMode))
+            } ?: emptyList(),
+            footerElements = footer?.let {
+                listOf(createHeaderFooterElement(it, page.dimensions.footerRect, page.index, isDarkMode))
+            } ?: emptyList()
+        )
+    }
+
+    private fun resolveHeaderForPage(
+        candidates: List<DocumentElement.HeaderFooter>,
+        pageIndex: Int,
+        isFirstPageOfSection: Boolean
+    ): DocumentElement.HeaderFooter? {
+        if (candidates.isEmpty()) return null
+        val variants = candidates.associateBy { it.content.variant }
+        return when {
+            isFirstPageOfSection && variants.containsKey("first") -> variants["first"]
+            pageIndex % 2 == 1 && variants.containsKey("even") -> variants["even"]
+            else -> variants["default"] ?: candidates.first()
+        }
+    }
+
+    private fun createHeaderFooterElement(
+        element: DocumentElement.HeaderFooter,
+        rect: LayoutRect,
+        pageIndex: Int,
+        isDarkMode: Boolean
+    ): PositionedElement {
+        val bounds = RectF(rect.left, rect.top, rect.right, rect.bottom)
+        return PositionedElement(
+            elementId = element.id,
+            element = element,
+            pageIndex = pageIndex,
+            bounds = bounds,
+            layoutResult = buildTextLayoutResult(element.content.text, rect.width(), isDarkMode)
+        )
     }
 
     private fun paginateElement(
@@ -75,10 +197,10 @@ class PrintPaginator(
     ) {
         if (flowController.isPageBreak(element)) {
             if (state.currentPageElements.isNotEmpty()) {
-                advanceToNextPage(state, dimensions)
+                advanceToNextPage(state)
             } else {
                 state.currentPageIndex++
-                state.currentY = dimensions.marginTop
+                state.currentY = dimensions.bodyTop
             }
             return
         }
@@ -88,7 +210,7 @@ class PrintPaginator(
         while (pending != null) {
             val currentElement = pending
             val elementHeight = measureElement(currentElement, dimensions)
-            val availableSpace = dimensions.printableHeight - (state.currentY - dimensions.marginTop)
+            val availableSpace = dimensions.bodyHeight - (state.currentY - dimensions.bodyTop)
 
             if (elementHeight <= availableSpace) {
                 addElementToPage(
@@ -101,9 +223,12 @@ class PrintPaginator(
                 )
                 state.currentY += elementHeight
                 pending = null
-            } else if (flowController.shouldNotSplit(currentElement)) {
+            } else if (flowController.shouldNotSplit(currentElement) ||
+                (elementHeight <= dimensions.bodyHeight &&
+                    flowController.shouldMoveToOwnPage(elementHeight, dimensions.bodyHeight))
+            ) {
                 if (state.currentPageElements.isNotEmpty()) {
-                    advanceToNextPage(state, dimensions)
+                    advanceToNextPage(state)
                 }
                 addElementToPage(
                     currentElement,
@@ -141,7 +266,7 @@ class PrintPaginator(
 
                 if (pending != null) {
                     if (state.currentPageElements.isNotEmpty()) {
-                        advanceToNextPage(state, dimensions)
+                        advanceToNextPage(state)
                     } else if (!madeProgress) {
                         addElementToPage(
                             pending,
@@ -178,11 +303,14 @@ class PrintPaginator(
     ): Pair<DocumentElement?, DocumentElement?> {
         if (element.spans.isEmpty()) return Pair(element, null)
 
+        val indent = indentationResolver.resolve(element.style.indentation, element.listInfo)
+
         val lastFittingLine = textMeasurer.getLastFittingLine(
             element.spans,
             element.style,
             widthPt,
-            availableHeightPt
+            availableHeightPt,
+            indent
         )
 
         if (lastFittingLine < 0) {
@@ -192,7 +320,8 @@ class PrintPaginator(
         val fullLayout = textMeasurer.buildParagraphLayout(
             spans = element.spans,
             style = element.style,
-            widthPt = widthPt
+            widthPt = widthPt,
+            indentation = indent
         ) ?: return Pair(element, null)
 
         val adjustedLine = flowController.adjustSplitPointForRules(fullLayout.lineCount, lastFittingLine)
@@ -283,7 +412,15 @@ class PrintPaginator(
 
         val height = when (element) {
             is DocumentElement.Paragraph -> {
-                textMeasurer.measureParagraph(element.spans, element.style, dimensions.printableWidth)
+                val indent = indentationResolver.resolve(element.style.indentation, element.listInfo)
+                val spacing = spacingResolver.resolve(element.style.spacing)
+                val textHeight = textMeasurer.measureParagraph(
+                    element.spans,
+                    element.style,
+                    dimensions.printableWidth,
+                    indent
+                )
+                spacing.beforePt + textHeight + spacing.afterPt
             }
             is DocumentElement.SectionHeader -> {
                 textMeasurer.measurePlainText(
@@ -296,13 +433,78 @@ class PrintPaginator(
             is DocumentElement.Table -> {
                 buildTableLayout(element, dimensions.printableWidth).totalHeightPt.coerceAtLeast(24f)
             }
-            is DocumentElement.Image -> 200f
+            is DocumentElement.Image -> measureImage(element, dimensions)
+            is DocumentElement.Drawing -> measureDrawing(element, dimensions)
+            is DocumentElement.Section -> 0f
             is DocumentElement.PageBreak -> 0f
             else -> 10f
         }
 
         registry.put(element.id, element, height)
         return height
+    }
+
+    private fun measureImage(
+        element: DocumentElement.Image,
+        dimensions: PageDimensions,
+        isDarkMode: Boolean = false
+    ): Float {
+        val layout = resolveImageLayout(
+            element = element,
+            availableWidthPt = dimensions.printableWidth,
+            maxHeightPt = dimensions.bodyHeight * imageLayoutConfig.maxHeightFraction,
+            isDarkMode = isDarkMode
+        )
+        measuredImageLayouts[element.id] = layout
+
+        val captionHeight = layout.captionLayout?.let { unitConverter.pxToPt(it.height.toFloat()) } ?: 0f
+        val captionSpacing = if (captionHeight > 0f) imageLayoutConfig.captionSpacingPt else 0f
+        return layout.displayHeightPt + captionSpacing + captionHeight
+    }
+
+    private fun resolveImageLayout(
+        element: DocumentElement.Image,
+        availableWidthPt: Float,
+        maxHeightPt: Float,
+        isDarkMode: Boolean = false
+    ): LayoutResult.ImageLayout {
+        val intrinsic = imageDimensionsProvider.intrinsicPoints(element.sourceUri)
+        val scaled = ImageScaleCalculator.scale(
+            intrinsicWidth = intrinsic?.widthPt,
+            intrinsicHeight = intrinsic?.heightPt,
+            availableWidth = availableWidthPt,
+            maxHeight = maxHeightPt,
+            fallbackHeight = imageLayoutConfig.fallbackHeightPt
+        )
+
+        val caption = element.caption?.takeIf { it.isNotBlank() }
+        val captionLayout = caption?.let {
+            textMeasurer.buildPlainTextLayout(
+                text = it,
+                fontSize = 10f,
+                widthPt = availableWidthPt,
+                isDarkMode = isDarkMode
+            )
+        }
+
+        return LayoutResult.ImageLayout(
+            intrinsicWidthPt = scaled.intrinsicWidth,
+            intrinsicHeightPt = scaled.intrinsicHeight,
+            displayWidthPt = scaled.displayWidth,
+            displayHeightPt = scaled.displayHeight,
+            sourceUri = element.sourceUri,
+            caption = caption,
+            captionLayout = captionLayout
+        )
+    }
+
+    private fun measureDrawing(element: DocumentElement.Drawing, dimensions: PageDimensions): Float {
+        val widthPt = element.info.widthEmu?.let { it / 914400f * 72f }
+        val heightPt = element.info.heightEmu?.let { it / 914400f * 72f }
+        if (widthPt == null || heightPt == null || widthPt <= 0f) return 200f
+
+        val scale = if (widthPt > dimensions.printableWidth) dimensions.printableWidth / widthPt else 1f
+        return (heightPt * scale).coerceAtLeast(1f)
     }
 
     private fun addElementToPage(
@@ -314,10 +516,16 @@ class PrintPaginator(
         isDarkMode: Boolean = false
     ) {
         val elementHeight = measureElement(element, dimensions)
+        val indent = when (element) {
+            is DocumentElement.Paragraph ->
+                indentationResolver.resolve(element.style.indentation, element.listInfo)
+            else -> ElementIndentation()
+        }
+
         val bounds = RectF(
-            dimensions.marginLeft,
+            dimensions.marginLeft + indent.leftPt,
             yPositionPt,
-            dimensions.marginLeft + dimensions.printableWidth,
+            dimensions.marginLeft + dimensions.printableWidth - indent.rightPt,
             yPositionPt + elementHeight
         )
 
@@ -327,118 +535,125 @@ class PrintPaginator(
                 element = element,
                 pageIndex = pageIndex,
                 bounds = bounds,
+                indentation = indent,
                 metadata = mapOf("originalHeight" to elementHeight),
-                layoutResult = createLayoutResult(element, dimensions.printableWidth, isDarkMode)
+                layoutResult = createLayoutResult(element, dimensions, indent, isDarkMode)
             )
         )
     }
 
     private fun createLayoutResult(
         element: DocumentElement,
-        widthPt: Float,
+        dimensions: PageDimensions,
+        indentation: ElementIndentation = ElementIndentation(),
         isDarkMode: Boolean = false
-    ): Any? {
+    ): LayoutResult {
+        val widthPt = dimensions.printableWidth
         return when (element) {
-            is DocumentElement.Paragraph -> {
-                textMeasurer.buildParagraphLayout(element.spans, element.style, widthPt, isDarkMode)
-            }
-            is DocumentElement.SectionHeader -> {
+            is DocumentElement.Paragraph ->
+                textMeasurer.buildParagraphLayout(element.spans, element.style, widthPt, indentation, isDarkMode)
+                    ?.let { LayoutResult.TextLayout(it) }
+                    ?: LayoutResult.Empty
+
+            is DocumentElement.SectionHeader ->
                 textMeasurer.buildPlainTextLayout(
                     text = element.text,
                     fontSize = (12 + (4 - element.level)).toFloat(),
                     isBold = true,
                     widthPt = widthPt,
                     isDarkMode = isDarkMode
+                )?.let { LayoutResult.TextLayout(it) } ?: LayoutResult.Empty
+
+            is DocumentElement.Table ->
+                LayoutResult.TableLayout(buildTableLayout(element, widthPt, indentation, isDarkMode))
+
+            is DocumentElement.Image ->
+                measuredImageLayouts[element.id]
+                    ?: resolveImageLayout(
+                        element = element,
+                        availableWidthPt = dimensions.printableWidth,
+                        maxHeightPt = dimensions.bodyHeight * imageLayoutConfig.maxHeightFraction,
+                        isDarkMode = isDarkMode
+                    )
+
+            is DocumentElement.Drawing ->
+                buildTextLayoutResult("drawing: ${element.info.kind}", widthPt, isDarkMode)
+
+            is DocumentElement.Note ->
+                buildTextLayoutResult(
+                    "${element.info.kind.name.lowercase()}: ${element.info.text}",
+                    widthPt,
+                    isDarkMode
                 )
-            }
-            is DocumentElement.Table -> buildTableLayout(element, widthPt, isDarkMode)
-            is DocumentElement.Section -> {
-                textMeasurer.buildPlainTextLayout(
-                    text = element.properties.toString(),
-                    fontSize = 11f,
-                    widthPt = widthPt,
-                    isDarkMode = isDarkMode
+
+            is DocumentElement.Comment ->
+                buildTextLayoutResult(
+                    "comment by ${element.info.author ?: "unknown"}: ${element.info.text}",
+                    widthPt,
+                    isDarkMode
                 )
-            }
-            is DocumentElement.HeaderFooter -> {
-                textMeasurer.buildPlainTextLayout(
-                    text = "${element.content.kind.name.lowercase()} (${element.content.variant}): ${element.content.text}",
-                    fontSize = 10f,
-                    widthPt = widthPt,
-                    isDarkMode = isDarkMode
+
+            is DocumentElement.Bookmark ->
+                buildTextLayoutResult(
+                    "bookmark ${element.info.boundary.name.lowercase()}: ${element.info.name.ifBlank { element.info.id }}",
+                    widthPt,
+                    isDarkMode
                 )
-            }
-            is DocumentElement.Note -> {
-                textMeasurer.buildPlainTextLayout(
-                    text = "${element.info.kind.name.lowercase()}: ${element.info.text}",
-                    fontSize = 10f,
-                    widthPt = widthPt,
-                    isDarkMode = isDarkMode
+
+            is DocumentElement.Field ->
+                buildTextLayoutResult(
+                    "field ${element.info.type}: ${element.info.instruction}",
+                    widthPt,
+                    isDarkMode
                 )
-            }
-            is DocumentElement.Comment -> {
-                textMeasurer.buildPlainTextLayout(
-                    text = "comment by ${element.info.author ?: "unknown"}: ${element.info.text}",
-                    fontSize = 10f,
-                    widthPt = widthPt,
-                    isDarkMode = isDarkMode
-                )
-            }
-            is DocumentElement.Bookmark -> {
-                textMeasurer.buildPlainTextLayout(
-                    text = "bookmark ${element.info.boundary.name.lowercase()}: ${element.info.name.ifBlank { element.info.id }}",
-                    fontSize = 10f,
-                    widthPt = widthPt,
-                    isDarkMode = isDarkMode
-                )
-            }
-            is DocumentElement.Field -> {
-                textMeasurer.buildPlainTextLayout(
-                    text = "field ${element.info.type}: ${element.info.instruction}",
-                    fontSize = 10f,
-                    widthPt = widthPt,
-                    isDarkMode = isDarkMode
-                )
-            }
-            is DocumentElement.Metadata -> {
-                textMeasurer.buildPlainTextLayout(
-                    text = buildString {
+
+            is DocumentElement.Metadata ->
+                buildTextLayoutResult(
+                    buildString {
                         append(element.info.title ?: element.info.kind)
                         append(": ")
                         append(element.info.summary)
                     },
-                    fontSize = 10f,
-                    widthPt = widthPt,
-                    isDarkMode = isDarkMode
+                    widthPt,
+                    isDarkMode
                 )
-            }
-            is DocumentElement.Drawing -> {
-                textMeasurer.buildPlainTextLayout(
-                    text = "drawing: ${element.info.kind}",
-                    fontSize = 10f,
-                    widthPt = widthPt,
-                    isDarkMode = isDarkMode
+
+            is DocumentElement.EmbeddedObject ->
+                buildTextLayoutResult(
+                    "embedded object: ${element.info.programId ?: element.info.kind}",
+                    widthPt,
+                    isDarkMode
                 )
-            }
-            is DocumentElement.EmbeddedObject -> {
-                textMeasurer.buildPlainTextLayout(
-                    text = "embedded object: ${element.info.programId ?: element.info.kind}",
-                    fontSize = 10f,
-                    widthPt = widthPt,
-                    isDarkMode = isDarkMode
-                )
-            }
-            else -> null
+
+            else -> LayoutResult.Empty
         }
+    }
+
+    private fun buildTextLayoutResult(
+        text: String,
+        widthPt: Float,
+        isDarkMode: Boolean
+    ): LayoutResult {
+        val layout = textMeasurer.buildPlainTextLayout(
+            text = text,
+            fontSize = 10f,
+            widthPt = widthPt,
+            isDarkMode = isDarkMode
+        )
+        return layout?.let { LayoutResult.TextLayout(it) } ?: LayoutResult.Empty
     }
 
     private fun buildTableLayout(
         element: DocumentElement.Table,
         widthPt: Float,
+        indentation: ElementIndentation = ElementIndentation(),
         isDarkMode: Boolean = false
     ): TableRenderLayout {
+        val effectiveWidth = (widthPt - indentation.leftPt - indentation.rightPt)
+            .coerceAtLeast(minTableColumnWidthPt)
+
         val columnCount = element.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
-        val columnWidthsPt = calculateColumnWidths(element.rows, widthPt, columnCount)
+        val columnWidthsPt = calculateColumnWidths(element.rows, effectiveWidth, columnCount)
 
         val rowLayouts = element.rows.ifEmpty { listOf(emptyList()) }.mapIndexed { rowIndex, row ->
             val cells = List(columnCount) { columnIndex ->
@@ -541,14 +756,13 @@ class PrintPaginator(
         )
     }
 
-    private fun advanceToNextPage(
-        state: PaginationState,
-        dimensions: PageDimensions
-    ) {
-        state.pages.add(createPage(state.currentPageIndex, state.currentPageElements, dimensions))
+    private fun advanceToNextPage(state: PaginationState) {
+        state.pages.add(
+            createPage(state.currentPageIndex, state.currentPageElements, state.currentDimensions)
+        )
         state.currentPageElements = mutableListOf()
         state.currentPageIndex++
-        state.currentY = dimensions.marginTop
+        state.currentY = state.currentDimensions.bodyTop
     }
 
     override fun estimatePageCount(
@@ -557,11 +771,16 @@ class PrintPaginator(
     ): Int {
         if (data.content.isEmpty()) return 1
 
+        val bodyHeight = dimensions.bodyHeight.takeIf { it > 0f } ?: dimensions.printableHeight
         var totalHeightPt = 0f
         for (element in data.content) {
             totalHeightPt += when (element) {
                 is DocumentElement.Paragraph -> {
-                    textMeasurer.measureParagraph(element.spans, element.style, dimensions.printableWidth)
+                    val indent = indentationResolver.resolve(element.style.indentation, element.listInfo)
+                    val spacing = spacingResolver.resolve(element.style.spacing)
+                    spacing.beforePt +
+                        textMeasurer.measureParagraph(element.spans, element.style, dimensions.printableWidth, indent) +
+                        spacing.afterPt
                 }
                 is DocumentElement.SectionHeader -> {
                     textMeasurer.measurePlainText(
@@ -572,12 +791,13 @@ class PrintPaginator(
                     )
                 }
                 is DocumentElement.Table -> buildTableLayout(element, dimensions.printableWidth).totalHeightPt
-                is DocumentElement.Image -> 200f
+                is DocumentElement.Image -> measureImage(element, dimensions)
+                is DocumentElement.Drawing -> measureDrawing(element, dimensions)
                 else -> 10f
             }
         }
 
-        return ceil(totalHeightPt / dimensions.printableHeight).toInt().coerceAtLeast(1)
+        return ceil(totalHeightPt / bodyHeight).toInt().coerceAtLeast(1)
     }
 
     override fun clearCache() {

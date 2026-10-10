@@ -15,8 +15,10 @@ data class DocumentColorTokens(
     val secondaryText: Int,
     val tableBackground: Int,
     val tableHeaderBackground: Int,
+    val tableHeaderText: Int,
     val tableBorder: Int,
     val tableCellBorder: Int,
+    val tableZebraBackground: Int,
     val placeholderBackground: Int,
     val placeholderBorder: Int
 ) {
@@ -28,8 +30,10 @@ data class DocumentColorTokens(
             secondaryText = 0xFF6B6B6B.toInt(),
             tableBackground = 0xFFFFFFFF.toInt(),
             tableHeaderBackground = 0xFFF2F2F2.toInt(),
+            tableHeaderText = 0xFF1C1B1F.toInt(),
             tableBorder = 0xFF7F7F7F.toInt(),
             tableCellBorder = 0xFFB0B0B0.toInt(),
+            tableZebraBackground = 0xFFF7F7F7.toInt(),
             placeholderBackground = 0xFFDADADA.toInt(),
             placeholderBorder = 0xFF8A8A8A.toInt()
         )
@@ -41,8 +45,10 @@ data class DocumentColorTokens(
             secondaryText = 0xFFBDBDBD.toInt(),
             tableBackground = 0xFF323232.toInt(),
             tableHeaderBackground = 0xFF3C3C3C.toInt(),
+            tableHeaderText = 0xFFECECEC.toInt(),
             tableBorder = 0xFF9A9A9A.toInt(),
             tableCellBorder = 0xFF5A5A5A.toInt(),
+            tableZebraBackground = 0xFF2E2E2E.toInt(),
             placeholderBackground = 0xFF3A3A3A.toInt(),
             placeholderBorder = 0xFF9A9A9A.toInt()
         )

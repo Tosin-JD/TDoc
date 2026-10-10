@@ -21,7 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -54,7 +56,7 @@ fun PageView(
     val basePageHeightPx = remember(pageModel.dimensions.height, unitConverter) {
         unitConverter.ptToPx(pageModel.dimensions.height)
     }
-    val renderBlock = remember(pageModel, renderer, scale) {
+    val renderBlock = remember(pageModel, renderer, scale, isEditable, isDarkMode, unitConverter) {
         { drawScope: androidx.compose.ui.graphics.drawscope.DrawScope ->
             with(renderer) {
                 with(drawScope) {
@@ -63,14 +65,31 @@ fun PageView(
                         size.height / basePageHeightPx
                     ) * scale
 
-                    if (pageScale != 1f) {
-                        withTransform({
-                            scale(scaleX = pageScale, scaleY = pageScale, pivot = Offset.Zero)
-                        }) {
-                            pageModel.elements.forEach { render(it, renderTextContent = !isEditable) }
+                    withTransform({
+                        scale(scaleX = pageScale, scaleY = pageScale, pivot = Offset.Zero)
+                    }) {
+                        pageModel.headerElements.forEach {
+                            render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
                         }
-                    } else {
-                        pageModel.elements.forEach { render(it, renderTextContent = !isEditable) }
+
+                        val bodyRect = pageModel.dimensions.bodyRect
+                        drawIntoCanvas { canvas ->
+                            canvas.nativeCanvas.save()
+                            canvas.nativeCanvas.clipRect(
+                                unitConverter.ptToPx(bodyRect.left),
+                                unitConverter.ptToPx(bodyRect.top),
+                                unitConverter.ptToPx(bodyRect.right),
+                                unitConverter.ptToPx(bodyRect.bottom)
+                            )
+                        }
+                        pageModel.elements.forEach {
+                            render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
+                        }
+                        drawIntoCanvas { canvas -> canvas.nativeCanvas.restore() }
+
+                        pageModel.footerElements.forEach {
+                            render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
+                        }
                     }
                 }
             }

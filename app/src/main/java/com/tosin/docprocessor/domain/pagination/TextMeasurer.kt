@@ -1,13 +1,20 @@
 package com.tosin.docprocessor.domain.pagination
 
 import android.content.Context
-import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import com.tosin.docprocessor.core.color.DocumentColorTokens
+import com.tosin.docprocessor.core.color.DocumentTextColorResolver
+import com.tosin.docprocessor.core.text.AndroidTypefaceMapper
+import com.tosin.docprocessor.core.text.SpannableTextBuilder
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.domain.model.layout.ElementIndentation
+import com.tosin.docprocessor.domain.typography.FontFamilyResolver
+import com.tosin.docprocessor.domain.typography.ResolvedLineHeight
+import com.tosin.docprocessor.domain.typography.TextFlowResolver
 
 /**
  * Measures text dimensions using Android's low-level StaticLayout.
@@ -15,17 +22,18 @@ import com.tosin.docprocessor.data.parser.internal.models.TextSpan
  */
 class TextMeasurer(
     private val context: Context,
-    private val unitConverter: UnitConverter
+    private val unitConverter: UnitConverter,
+    private val fontResolver: FontFamilyResolver = FontFamilyResolver(),
+    private val flowResolver: TextFlowResolver = TextFlowResolver()
 ) {
-    private val textPaintCache = mutableMapOf<String, TextPaint>()
-
     fun measureParagraph(
         spans: List<TextSpan>,
         style: ParagraphStyle,
         widthPt: Float,
+        indentation: ElementIndentation = ElementIndentation(),
         isDarkMode: Boolean = false
     ): Float {
-        val layout = buildParagraphLayout(spans, style, widthPt, isDarkMode) ?: return 0f
+        val layout = buildParagraphLayout(spans, style, widthPt, indentation, isDarkMode) ?: return 0f
         return unitConverter.pxToPt(layout.height.toFloat())
     }
 
@@ -56,9 +64,10 @@ class TextMeasurer(
         style: ParagraphStyle,
         widthPt: Float,
         maxHeightPt: Float,
+        indentation: ElementIndentation = ElementIndentation(),
         isDarkMode: Boolean = false
     ): Int {
-        val layout = buildParagraphLayout(spans, style, widthPt, isDarkMode) ?: return -1
+        val layout = buildParagraphLayout(spans, style, widthPt, indentation, isDarkMode) ?: return -1
         val maxHeightPx = unitConverter.ptToPx(maxHeightPt).toInt().coerceAtLeast(0)
         var line = layout.getLineForVertical(maxHeightPx)
 
@@ -73,19 +82,37 @@ class TextMeasurer(
         spans: List<TextSpan>,
         style: ParagraphStyle,
         widthPt: Float,
+        indentation: ElementIndentation = ElementIndentation(),
         isDarkMode: Boolean = false
     ): StaticLayout? {
         if (spans.isEmpty()) return null
 
-        val text = spans.joinToString("") { it.text }
+        val effectiveWidth = (widthPt - indentation.leftPt - indentation.rightPt)
+            .coerceAtLeast(72f)
+
+        val baseSizePt = spans.mapNotNull { it.fontSize?.toFloat() }.maxOrNull() ?: DEFAULT_FONT_SIZE_PT
+        val tokens = tokens(isDarkMode)
+        val text = SpannableTextBuilder.build(
+            spans = spans,
+            baseSizePt = baseSizePt,
+            fontResolver = fontResolver,
+            tokens = tokens,
+            isDarkMode = isDarkMode,
+            sizeToPx = { pt -> unitConverter.ptToPx(pt).toInt().coerceAtLeast(1) }
+        )
         if (text.isEmpty()) return null
+
+        val paint = createBasePaint(baseSizePt, isDarkMode)
+        val lineSpacing = lineSpacingFor(flowResolver.resolveLineHeight(style.spacing), paint)
 
         return buildLayout(
             text = text,
-            paint = createTextPaint(spans.first(), isDarkMode),
-            widthPt = widthPt,
+            paint = paint,
+            widthPt = effectiveWidth,
             alignment = alignmentToLayout(style.alignment),
-            lineSpacingPx = unitConverter.ptToPx(style.spacing.line?.toFloat() ?: 0f)
+            lineSpacingPx = lineSpacing.first,
+            lineSpacingMultiplier = lineSpacing.second,
+            justificationMode = justificationModeFor(style.alignment)
         )
     }
 
@@ -100,11 +127,10 @@ class TextMeasurer(
     ): StaticLayout? {
         if (text.isEmpty()) return null
 
-        val textColor = if (isDarkMode) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
         val paint = TextPaint().apply {
             textSize = unitConverter.ptToPx(fontSize)
-            typeface = getTypeface(fontFamily, isBold, isItalic)
-            color = textColor
+            typeface = AndroidTypefaceMapper.map(fontResolver.resolve(fontFamily), isBold, isItalic)
+            color = DocumentTextColorResolver.resolvePlainTextColor(tokens(isDarkMode), isDarkMode)
             isAntiAlias = true
             isSubpixelText = true
         }
@@ -125,88 +151,84 @@ class TextMeasurer(
         return if (lineNumber < layout.lineCount) layout.getLineEnd(lineNumber) else layout.text.length
     }
 
-    private fun isNearBlack(argb: Int): Boolean {
-        val red = (argb shr 16) and 0xFF
-        val green = (argb shr 8) and 0xFF
-        val blue = argb and 0xFF
-        return (red * 0.299 + green * 0.587 + blue * 0.114) < 50
+    fun clearCache() {
+        AndroidTypefaceMapper.clearCache()
     }
 
-    private fun createTextPaint(span: TextSpan, isDarkMode: Boolean = false): TextPaint {
-        val cacheKey = "${span.fontFamily}_${span.fontSize}_${span.isBold}_${span.isItalic}_${span.color}_$isDarkMode"
+    private fun tokens(isDarkMode: Boolean): DocumentColorTokens =
+        if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
 
-        return textPaintCache.getOrPut(cacheKey) {
-            val parsedColor = parseColorString(span.color)
-            val finalColor = if (isDarkMode) {
-                if (isNearBlack(parsedColor)) 0xFFFFFFFF.toInt() else parsedColor
-            } else {
-                parsedColor
+    private fun createBasePaint(sizePt: Float, isDarkMode: Boolean): TextPaint = TextPaint().apply {
+        textSize = unitConverter.ptToPx(sizePt)
+        typeface = AndroidTypefaceMapper.map(fontResolver.resolve(null), false, false)
+        color = DocumentTextColorResolver.resolvePlainTextColor(tokens(isDarkMode), isDarkMode)
+        isAntiAlias = true
+        isSubpixelText = true
+    }
+
+    /**
+     * Translates a resolved line height into the pair consumed by
+     * [StaticLayout.Builder.setLineSpacing]. Exact/AT_LEAST rules become an
+     * additive gap so text never renders shorter than the document requested.
+     */
+    private fun lineSpacingFor(resolved: ResolvedLineHeight, paint: TextPaint): Pair<Float, Float> =
+        when (resolved) {
+            is ResolvedLineHeight.Multiplier -> 0f to resolved.multiplier
+            is ResolvedLineHeight.Exact -> {
+                val metrics = paint.fontMetrics
+                val naturalPx = metrics.descent - metrics.ascent + metrics.leading
+                val targetPx = unitConverter.ptToPx(resolved.points)
+                (targetPx - naturalPx).coerceAtLeast(0f) to 1f
             }
-
-            TextPaint().apply {
-                textSize = unitConverter.ptToPx(span.fontSize?.toFloat() ?: 12f)
-                typeface = getTypeface(span.fontFamily, span.isBold, span.isItalic)
-                color = finalColor
-                isAntiAlias = true
-                isSubpixelText = true
-            }
+            ResolvedLineHeight.Unspecified -> 0f to 1f
         }
-    }
-
-    private fun getTypeface(fontFamily: String?, isBold: Boolean, isItalic: Boolean): Typeface {
-        val style = when {
-            isBold && isItalic -> Typeface.BOLD_ITALIC
-            isBold -> Typeface.BOLD
-            isItalic -> Typeface.ITALIC
-            else -> Typeface.NORMAL
-        }
-
-        return if (fontFamily != null) {
-            Typeface.create(fontFamily, style)
-        } else {
-            Typeface.defaultFromStyle(style)
-        }
-    }
-
-    private fun parseColorString(colorStr: String): Int {
-        return try {
-            val hex = if (colorStr.startsWith("#")) colorStr.substring(1) else colorStr
-            val fullHex = if (hex.length == 6) "FF$hex" else hex
-            fullHex.toLong(16).toInt()
-        } catch (_: Exception) {
-            0xFF000000.toInt()
-        }
-    }
 
     private fun alignmentToLayout(alignment: ParagraphAlignment): Layout.Alignment {
         return when (alignment) {
             ParagraphAlignment.START -> Layout.Alignment.ALIGN_NORMAL
             ParagraphAlignment.END -> Layout.Alignment.ALIGN_OPPOSITE
             ParagraphAlignment.CENTER -> Layout.Alignment.ALIGN_CENTER
-            ParagraphAlignment.JUSTIFIED -> Layout.Alignment.ALIGN_NORMAL
-            ParagraphAlignment.DISTRIBUTED -> Layout.Alignment.ALIGN_CENTER
+            ParagraphAlignment.JUSTIFIED, ParagraphAlignment.DISTRIBUTED -> Layout.Alignment.ALIGN_NORMAL
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun buildLayout(
-        text: String,
+        text: CharSequence,
         paint: TextPaint,
         widthPt: Float,
         alignment: Layout.Alignment,
-        lineSpacingPx: Float = 0f
+        lineSpacingPx: Float = 0f,
+        lineSpacingMultiplier: Float = 1f,
+        justificationMode: Int = Layout.JUSTIFICATION_MODE_NONE
     ): StaticLayout {
         val widthPx = unitConverter.ptToPx(widthPt).toInt().coerceAtLeast(1)
 
-        return StaticLayout.Builder.obtain(text, 0, text.length, paint, widthPx)
+        val builder = StaticLayout.Builder.obtain(text, 0, text.length, paint, widthPx)
             .setAlignment(alignment)
-            .setLineSpacing(lineSpacingPx, 1f)
+            .setLineSpacing(lineSpacingPx, lineSpacingMultiplier)
             .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
-            .setIncludePad(true)
-            .build()
+            .setIncludePad(false)
+
+        if (justificationMode != Layout.JUSTIFICATION_MODE_NONE) {
+            builder.setJustificationMode(justificationMode)
+        }
+
+        return builder.build()
     }
 
-    fun clearCache() {
-        textPaintCache.clear()
+    private companion object {
+        const val DEFAULT_FONT_SIZE_PT = 12f
     }
+}
+
+/**
+ * Maps a paragraph alignment to a `StaticLayout` justification mode. Kept as a
+ * pure function so the mapping can be unit-tested without an Android device.
+ */
+@Suppress("DEPRECATION")
+internal fun justificationModeFor(alignment: ParagraphAlignment): Int = when (alignment) {
+    ParagraphAlignment.JUSTIFIED, ParagraphAlignment.DISTRIBUTED -> Layout.JUSTIFICATION_MODE_INTER_WORD
+    else -> Layout.JUSTIFICATION_MODE_NONE
 }

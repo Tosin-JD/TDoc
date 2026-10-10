@@ -1,6 +1,7 @@
 package com.tosin.docprocessor.domain.pagination
 
 import android.content.Context
+import com.tosin.docprocessor.core.rendering.BitmapImageDimensionsProvider
 import com.tosin.docprocessor.domain.model.DocumentElement
 
 /**
@@ -20,12 +21,17 @@ class PaginationEngineFactory(private val context: Context) {
         val textMeasurer = TextMeasurer(context, unitConverter)
         val registry = LayoutRegistry()
         val flowController = FlowController(textMeasurer, unitConverter)
+        val imageDimensionsProvider = BitmapImageDimensionsProvider()
 
         return if (useIncrementalUpdates) {
-            val printPaginator = PrintPaginator(textMeasurer, unitConverter, registry, flowController)
-            IncrementalPaginator(printPaginator, textMeasurer, unitConverter, registry, flowController)
+            val printPaginator = PrintPaginator(
+                textMeasurer, unitConverter, registry, flowController, imageDimensionsProvider
+            )
+            IncrementalPaginator(
+                printPaginator, textMeasurer, unitConverter, registry, flowController, imageDimensionsProvider
+            )
         } else {
-            PrintPaginator(textMeasurer, unitConverter, registry, flowController)
+            PrintPaginator(textMeasurer, unitConverter, registry, flowController, imageDimensionsProvider)
         }
     }
 

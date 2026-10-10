@@ -15,8 +15,8 @@ import com.tosin.docprocessor.domain.model.layout.PositionedElement
  * These rules are typographic best practices that make documents more readable.
  */
 class FlowController(
-    private val textMeasurer: TextMeasurer,
-    private val unitConverter: UnitConverter
+    @Suppress("unused") private val textMeasurer: TextMeasurer? = null,
+    @Suppress("unused") private val unitConverter: UnitConverter? = null
 ) {
     /**
      * Pagination rules configuration.
@@ -65,6 +65,17 @@ class FlowController(
      */
     fun isPageBreak(element: DocumentElement): Boolean {
         return element is DocumentElement.PageBreak
+    }
+
+    /**
+     * Check if an oversized block should be moved onto its own page.
+     *
+     * If an element consumes almost the entire body, placing it on a fresh page
+     * avoids leaving a large empty gap at the bottom of the previous page.
+     */
+    fun shouldMoveToOwnPage(elementHeight: Float, bodyHeight: Float): Boolean {
+        if (bodyHeight <= 0f) return false
+        return elementHeight > bodyHeight * 0.9f
     }
 
     /**

@@ -19,6 +19,19 @@ enum class ParagraphAlignment {
     DISTRIBUTED
 }
 
+/**
+ * How [ParagraphSpacing.line] is interpreted.
+ *
+ * - [AUTO]: a multiple of the line, expressed in 240ths of a line (matches
+ *   OOXML `w:line` with `w:lineRule="auto"`).
+ * - [EXACT] / [AT_LEAST]: an absolute length in twips.
+ */
+enum class LineSpacingRule {
+    AUTO,
+    EXACT,
+    AT_LEAST
+}
+
 data class ParagraphIndentation(
     val left: Int? = null,
     val right: Int? = null,
@@ -29,5 +42,10 @@ data class ParagraphIndentation(
 data class ParagraphSpacing(
     val before: Int? = null,
     val after: Int? = null,
-    val line: Int? = null
+    /**
+     * Line spacing in OOXML units: 240ths of a line when [lineRule] is
+     * [LineSpacingRule.AUTO], otherwise twips.
+     */
+    val line: Int? = null,
+    val lineRule: LineSpacingRule? = null
 )
