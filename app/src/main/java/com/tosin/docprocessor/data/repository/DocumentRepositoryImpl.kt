@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import com.tosin.docprocessor.domain.model.DocumentData
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.MimeTypes
+import com.tosin.docprocessor.domain.document.ParseResult
 import com.tosin.docprocessor.data.parser.ParserFactory
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -21,14 +22,14 @@ class DocumentRepositoryImpl @Inject constructor(
     private val parserFactory: ParserFactory
 ) : DocumentRepository {
 
-    override suspend fun readDocumentFromUri(uri: Uri): List<DocumentElement> {
+    override suspend fun readDocumentFromUri(uri: Uri): ParseResult {
         val contentResolver = context.contentResolver
         val fileName = getFileName(uri)
         val mimeType = contentResolver.getType(uri) ?: MimeTypes.fromExtension(fileName.substringAfterLast('.', "")) ?: ""
 
         return contentResolver.openInputStream(uri)?.use { inputStream ->
-            parseStream(inputStream, mimeType)
-        } ?: plainTextDocument("Failed to open file")
+            parseStreamReport(inputStream.readBytes(), mimeType)
+        } ?: ParseResult(content = plainTextDocument("Failed to open file"))
     }
 
     override suspend fun saveDocumentToUri(uri: Uri, content: List<DocumentElement>) {
@@ -123,6 +124,40 @@ class DocumentRepositoryImpl @Inject constructor(
         val parser = parserFactory.createParser(mimeType)
         return parser?.parse(inputStream)?.getOrThrow()
             ?: plainTextDocument(inputStream.bufferedReader().use { it.readText() })
+    }
+
+    /** Rich parse path: returns the full [ParseResult] with diagnostics and the legacy projection. */
+    private suspend fun parseStreamReport(bytes: ByteArray, mimeType: String): ParseResult {
+        val parser = parserFactory.createRichParser(bytes, mimeType)
+            ?: return ParseResult(content = plainTextDocument(bytes.toString(Charsets.UTF_8)))
+        return materializeResources(parser.parseWithReport(java.io.ByteArrayInputStream(bytes)).getOrThrow())
+    }
+
+    /**
+     * Writes parsed resource bytes to the app cache so image renderers can load
+     * them by file path, then remaps [DocumentElement.Image] source URIs to those
+     * files. Logical URIs are preserved in the rich [ParseResult.document]; only
+     * the temporary legacy projection is rewritten.
+     */
+    private fun materializeResources(result: ParseResult): ParseResult {
+        if (result.document.resources.isEmpty()) return result
+        val cacheDir = File(context.cacheDir, "media").apply { mkdirs() }
+        val pathById = result.document.resources.mapValues { (id, resource) ->
+            resource.bytes?.let { bytes ->
+                val file = File(cacheDir, id.map { if (it == '/') '_' else it }.joinToString(""))
+                if (!file.exists()) file.writeBytes(bytes)
+                file.absolutePath
+            }
+        }
+        if (pathById.values.none { it != null }) return result
+        val remapped = result.content.map { element ->
+            if (element is DocumentElement.Image) {
+                pathById[element.sourceUri]?.let { element.copy(sourceUri = it) } ?: element
+            } else {
+                element
+            }
+        }
+        return result.copy(content = remapped)
     }
 
     private fun plainTextDocument(text: String): List<DocumentElement> =

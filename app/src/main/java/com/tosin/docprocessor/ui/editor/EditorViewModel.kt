@@ -11,6 +11,8 @@ import com.tosin.docprocessor.domain.model.DocumentData
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.EditorMode
 import com.tosin.docprocessor.domain.model.ViewMode
+import com.tosin.docprocessor.domain.document.DiagnosticsSummary
+import com.tosin.docprocessor.domain.document.ParseDiagnostic
 import com.tosin.docprocessor.data.local.dao.RecentFileDao
 import com.tosin.docprocessor.data.local.entities.RecentFile
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
@@ -44,6 +46,9 @@ class EditorViewModel @Inject constructor(
 
     private val _events = MutableSharedFlow<String>()
     val events = _events.asSharedFlow()
+
+    private val _diagnostics = MutableStateFlow<List<ParseDiagnostic>>(emptyList())
+    val diagnostics: StateFlow<List<ParseDiagnostic>> = _diagnostics.asStateFlow()
 
     private var currentUri: Uri? = null
 
@@ -94,7 +99,8 @@ class EditorViewModel @Inject constructor(
             viewModelScope.launch(Dispatchers.IO) {
                 _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
                 try {
-                    val elements = documentRepository.readDocumentFromUri(it)
+                    val result = documentRepository.readDocumentFromUri(it)
+                    val elements = result.content
                     val fileName = documentRepository.getFileName(it)
                     val document = DocumentData(
                         filename = fileName,
@@ -105,7 +111,14 @@ class EditorViewModel @Inject constructor(
                     withContext(Dispatchers.Main) {
                         documentElements = elements
                         _currentDocument.value = document
+                        _diagnostics.value = result.diagnostics
                         syncDocumentState(document)
+                        _uiState.value = _uiState.value.copy(
+                            compatibility = result.compatibility,
+                            diagnostics = DiagnosticsSummary.from(result.diagnostics),
+                            outline = result.document.outline,
+                            protected = result.document.settings.isProtected
+                        )
                     }
                     _events.emit("Opened: $fileName")
                 } catch (e: Exception) {
@@ -122,6 +135,7 @@ class EditorViewModel @Inject constructor(
         currentUri = null
         documentElements = emptyList()
         _currentDocument.value = null
+        _diagnostics.value = emptyList()
         _uiState.value = EditorUiState()
     }
 

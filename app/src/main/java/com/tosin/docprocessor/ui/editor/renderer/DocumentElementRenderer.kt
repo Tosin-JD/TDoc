@@ -2,14 +2,22 @@ package com.tosin.docprocessor.ui.editor.renderer
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -167,12 +175,58 @@ fun DocumentElementRenderer(
 
         is DocumentElement.Drawing -> MetadataText("drawing: ${element.info.kind}")
 
-        is DocumentElement.EmbeddedObject -> MetadataText(
-            "embedded object: ${element.info.programId ?: element.info.kind}"
+        is DocumentElement.EmbeddedObject -> UnsupportedPlaceholder(
+            kind = element.info.programId ?: element.info.kind,
+            description = element.info.description,
+            isDarkMode = isDarkMode
         )
 
         is DocumentElement.PageBreak -> {
             Text(text = "", modifier = Modifier.padding(vertical = 12.dp))
+        }
+    }
+}
+
+/**
+ * Neutral, non-alarming surface shown for constructs the renderer cannot draw.
+ * Never hidden: it names the construct and explains that it is preserved.
+ */
+@Composable
+private fun UnsupportedPlaceholder(
+    kind: String,
+    description: String?,
+    isDarkMode: Boolean
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isDarkMode) 0.5f else 1f),
+        tonalElevation = 1.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Info,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Column {
+                Text(
+                    text = "Unsupported: $kind",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = description ?: "Preserved in the package; not rendered.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

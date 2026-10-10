@@ -72,9 +72,12 @@ fun EditorScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val focusRequester = remember { FocusRequester() }
     val uiState by viewModel.uiState.collectAsState()
+    val diagnostics by viewModel.diagnostics.collectAsState()
     var showMoreMenu by remember { mutableStateOf(false) }
     var showFontSheet by remember { mutableStateOf(false) }
+    var showDiagnostics by remember { mutableStateOf(false) }
     val fontSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val diagnosticsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val context = LocalContext.current
 
@@ -244,6 +247,16 @@ fun EditorScreen(
                         CircularProgressIndicator()
                     }
                 }
+
+                if (uiState.editorMode == EditorMode.PREVIEW) {
+                    DiagnosticsSummaryChip(
+                        summary = uiState.diagnostics,
+                        onClick = { showDiagnostics = true },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(12.dp)
+                    )
+                }
             }
 
             if (uiState.editorMode == EditorMode.EDIT) {
@@ -263,6 +276,14 @@ fun EditorScreen(
         FontFeaturesSheet(
             sheetState = fontSheetState,
             onDismiss = { showFontSheet = false }
+        )
+    }
+
+    if (showDiagnostics) {
+        DiagnosticsSheet(
+            diagnostics = diagnostics,
+            sheetState = diagnosticsSheetState,
+            onDismiss = { showDiagnostics = false }
         )
     }
 }
