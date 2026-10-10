@@ -1,6 +1,6 @@
 package com.tosin.docprocessor.data.parser.validation
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.util.TDocLogger
 
 class DocumentValidator {

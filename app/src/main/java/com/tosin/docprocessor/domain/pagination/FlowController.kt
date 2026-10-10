@@ -1,7 +1,7 @@
 package com.tosin.docprocessor.domain.pagination
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
-import com.tosin.docprocessor.data.common.model.layout.PositionedElement
+import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.model.layout.PositionedElement
 
 /**
  * Manages pagination rules and flow control.

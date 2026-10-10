@@ -1,9 +1,8 @@
 package com.tosin.docprocessor.data.parser.odt
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.internal.models.TableMetadata
 import org.w3c.dom.Element
-import org.w3c.dom.NodeList
 
 import com.tosin.docprocessor.data.parser.internal.models.EdgeInsets
 

@@ -1,5 +1,5 @@
 package com.tosin.docprocessor.data.parser.odt
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.recovery.GracefulDegradationStrategy
 import com.tosin.docprocessor.data.parser.recovery.RecoveryStrategy
 import org.w3c.dom.Element

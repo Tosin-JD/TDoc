@@ -19,8 +19,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.core.rendering.PrintElementRenderer
-import com.tosin.docprocessor.data.common.model.DocumentData
-import com.tosin.docprocessor.data.common.model.layout.PageDimensions
+import com.tosin.docprocessor.domain.model.DocumentData
+import com.tosin.docprocessor.domain.model.layout.PageDimensions
 import com.tosin.docprocessor.domain.pagination.FlowController
 import com.tosin.docprocessor.domain.pagination.LayoutRegistry
 import com.tosin.docprocessor.domain.pagination.PrintPaginator

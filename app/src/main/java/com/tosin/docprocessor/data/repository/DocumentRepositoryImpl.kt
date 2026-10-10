@@ -3,9 +3,9 @@ package com.tosin.docprocessor.data.repository
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import com.tosin.docprocessor.data.common.model.DocumentData
-import com.tosin.docprocessor.data.common.model.DocumentElement
-import com.tosin.docprocessor.data.common.model.MimeTypes
+import com.tosin.docprocessor.domain.model.DocumentData
+import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.model.MimeTypes
 import com.tosin.docprocessor.data.parser.ParserFactory
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import dagger.hilt.android.qualifiers.ApplicationContext

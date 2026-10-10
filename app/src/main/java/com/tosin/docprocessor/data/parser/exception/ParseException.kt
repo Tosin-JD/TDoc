@@ -1,7 +1,5 @@
 package com.tosin.docprocessor.data.parser.exception
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
-
 data class ParseErrorContext(
     val fileName: String? = null,
     val bytesParsed: Long? = null,

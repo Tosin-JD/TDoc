@@ -1,4 +1,4 @@
-package com.tosin.docprocessor.data.common.model
+package com.tosin.docprocessor.domain.model
 
 object MimeTypes {
     const val DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

@@ -1,4 +1,4 @@
-package com.tosin.docprocessor.data.common.model.layout
+package com.tosin.docprocessor.domain.model.layout
 
 /**
  * Defines the boundary for the layout engine using Points (pt).

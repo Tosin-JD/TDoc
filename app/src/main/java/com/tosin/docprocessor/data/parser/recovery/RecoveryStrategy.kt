@@ -1,6 +1,5 @@
 package com.tosin.docprocessor.data.parser.recovery
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
 import com.tosin.docprocessor.data.parser.util.TDocLogger
 
 interface RecoveryStrategy {

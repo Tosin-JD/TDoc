@@ -1,7 +1,7 @@
 package com.tosin.docprocessor.domain.pagination
 
 import android.content.Context
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.domain.model.DocumentElement
 
 /**
  * Factory for creating pagination engine instances.

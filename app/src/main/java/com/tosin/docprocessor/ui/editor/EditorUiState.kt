@@ -1,8 +1,8 @@
 package com.tosin.docprocessor.ui.editor
 
-import com.tosin.docprocessor.data.common.model.DocumentData
-import com.tosin.docprocessor.data.common.model.EditorMode
-import com.tosin.docprocessor.data.common.model.ViewMode
+import com.tosin.docprocessor.domain.model.DocumentData
+import com.tosin.docprocessor.domain.model.EditorMode
+import com.tosin.docprocessor.domain.model.ViewMode
 
 data class EditorUiState(
     val documentData: DocumentData? = null,

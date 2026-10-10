@@ -1,15 +1,15 @@
 package com.tosin.docprocessor.domain.pagination
 
 import android.graphics.RectF
-import com.tosin.docprocessor.data.common.model.DocumentData
-import com.tosin.docprocessor.data.common.model.DocumentElement
-import com.tosin.docprocessor.data.common.model.layout.PageDimensions
-import com.tosin.docprocessor.data.common.model.layout.PageModel
-import com.tosin.docprocessor.data.common.model.layout.PageState
-import com.tosin.docprocessor.data.common.model.layout.PositionedElement
-import com.tosin.docprocessor.data.common.model.layout.TableCellLayout
-import com.tosin.docprocessor.data.common.model.layout.TableRenderLayout
-import com.tosin.docprocessor.data.common.model.layout.TableRowLayout
+import com.tosin.docprocessor.domain.model.DocumentData
+import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.model.layout.PageDimensions
+import com.tosin.docprocessor.domain.model.layout.PageModel
+import com.tosin.docprocessor.domain.model.layout.PageState
+import com.tosin.docprocessor.domain.model.layout.PositionedElement
+import com.tosin.docprocessor.domain.model.layout.TableCellLayout
+import com.tosin.docprocessor.domain.model.layout.TableRenderLayout
+import com.tosin.docprocessor.domain.model.layout.TableRowLayout
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import kotlin.math.ceil
 

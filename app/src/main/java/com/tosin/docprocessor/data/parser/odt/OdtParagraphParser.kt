@@ -1,6 +1,8 @@
 package com.tosin.docprocessor.data.parser.odt
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.data.parser.internal.models.CommentInfo
+import com.tosin.docprocessor.data.parser.internal.models.NoteInfo
+import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import org.w3c.dom.Element
@@ -102,7 +104,7 @@ class OdtParagraphParser(
                             val body = element.getElementsByTagNameNS(textNs, "${element.localName}-body").item(0) as? Element
                             val text = body?.textContent?.trim().orEmpty()
                             extraElements += DocumentElement.Note(
-                                info = com.tosin.docprocessor.data.parser.internal.models.NoteInfo(
+                                info = NoteInfo(
                                     kind = kind,
                                     id = "odt_${System.currentTimeMillis()}",
                                     text = text
@@ -113,7 +115,7 @@ class OdtParagraphParser(
                             val author = element.getElementsByTagNameNS("http://purl.org/dc/elements/1.1/", "creator").item(0)?.textContent
                             val text = element.textContent.trim()
                             extraElements += DocumentElement.Comment(
-                                info = com.tosin.docprocessor.data.parser.internal.models.CommentInfo(
+                                info = CommentInfo(
                                     id = "odt_${System.currentTimeMillis()}",
                                     author = author,
                                     text = text

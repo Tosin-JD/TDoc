@@ -1,7 +1,7 @@
-package com.tosin.docprocessor.data.common.model.layout
+package com.tosin.docprocessor.domain.model.layout
 
 import android.graphics.RectF
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.domain.model.DocumentElement
 
 /**
  * Geometric bridge between raw content and physical location.

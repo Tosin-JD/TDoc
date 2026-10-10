@@ -1,13 +1,17 @@
 package com.tosin.docprocessor.data.parser.docx
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.DocumentParser
 import com.tosin.docprocessor.data.parser.exception.ParseErrorContext
 import com.tosin.docprocessor.data.parser.exception.ParseException
+import com.tosin.docprocessor.data.parser.internal.models.CommentInfo
+import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterContent
+import com.tosin.docprocessor.data.parser.internal.models.NoteInfo
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphIndentation
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphSpacing
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
+import com.tosin.docprocessor.data.parser.internal.models.TableMetadata
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import com.tosin.docprocessor.data.parser.recovery.GracefulDegradationStrategy
 import com.tosin.docprocessor.data.parser.recovery.RecoveryStrategy
@@ -199,7 +203,7 @@ class DocxParser(
 
         return if (rows.isEmpty()) null else DocumentElement.Table(
             rows = rows,
-            metadata = com.tosin.docprocessor.data.parser.internal.models.TableMetadata(
+            metadata = TableMetadata(
                 styleId = tableStyleId,
                 shadingColor = shadingColor
             )
@@ -220,7 +224,7 @@ class DocxParser(
                 val xml = docxPackage.xml(target) ?: return@forEach
                 val text = xml.documentElement.textContent.trim()
                 elements += DocumentElement.HeaderFooter(
-                    content = com.tosin.docprocessor.data.parser.internal.models.HeaderFooterContent(
+                    content = HeaderFooterContent(
                         kind = kind,
                         variant = ref.attribute("type") ?: "default",
                         text = text,
@@ -251,7 +255,7 @@ class DocxParser(
             
             val text = note.descendants("t").joinToString("") { it.textContent.orEmpty() }
             elements += DocumentElement.Note(
-                info = com.tosin.docprocessor.data.parser.internal.models.NoteInfo(
+                info = NoteInfo(
                     kind = kind,
                     id = id,
                     text = text
@@ -271,7 +275,7 @@ class DocxParser(
             val text = comment.descendants("t").joinToString("") { it.textContent.orEmpty() }
             
             elements += DocumentElement.Comment(
-                info = com.tosin.docprocessor.data.parser.internal.models.CommentInfo(
+                info = CommentInfo(
                     id = id,
                     author = author,
                     text = text

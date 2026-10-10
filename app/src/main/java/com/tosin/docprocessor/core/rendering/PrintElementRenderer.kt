@@ -10,9 +10,9 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import com.tosin.docprocessor.data.common.model.DocumentElement
-import com.tosin.docprocessor.data.common.model.layout.PositionedElement
-import com.tosin.docprocessor.data.common.model.layout.TableRenderLayout
+import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.model.layout.PositionedElement
+import com.tosin.docprocessor.domain.model.layout.TableRenderLayout
 import com.tosin.docprocessor.domain.pagination.UnitConverter
 import java.io.File
 

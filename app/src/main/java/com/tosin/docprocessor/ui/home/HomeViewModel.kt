@@ -6,7 +6,7 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.tosin.docprocessor.data.common.model.MimeTypes
+import com.tosin.docprocessor.domain.model.MimeTypes
 import com.tosin.docprocessor.data.local.dao.RecentFileDao
 import com.tosin.docprocessor.data.local.entities.RecentFile
 import dagger.hilt.android.lifecycle.HiltViewModel

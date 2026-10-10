@@ -1,6 +1,6 @@
 package com.tosin.docprocessor.data.parser.odt
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.domain.model.DocumentElement
 import org.w3c.dom.Element
 import java.io.File
 import java.io.FileOutputStream

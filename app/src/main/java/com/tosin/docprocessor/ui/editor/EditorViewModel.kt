@@ -7,10 +7,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.tosin.docprocessor.data.common.model.DocumentData
-import com.tosin.docprocessor.data.common.model.DocumentElement
-import com.tosin.docprocessor.data.common.model.EditorMode
-import com.tosin.docprocessor.data.common.model.ViewMode
+import com.tosin.docprocessor.domain.model.DocumentData
+import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.model.EditorMode
+import com.tosin.docprocessor.domain.model.ViewMode
 import com.tosin.docprocessor.data.local.dao.RecentFileDao
 import com.tosin.docprocessor.data.local.entities.RecentFile
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan

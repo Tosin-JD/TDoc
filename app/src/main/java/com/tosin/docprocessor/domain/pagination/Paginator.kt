@@ -1,8 +1,8 @@
 package com.tosin.docprocessor.domain.pagination
 
-import com.tosin.docprocessor.data.common.model.DocumentData
-import com.tosin.docprocessor.data.common.model.layout.PageDimensions
-import com.tosin.docprocessor.data.common.model.layout.PageModel
+import com.tosin.docprocessor.domain.model.DocumentData
+import com.tosin.docprocessor.domain.model.layout.PageDimensions
+import com.tosin.docprocessor.domain.model.layout.PageModel
 
 /**
  * Core interface for the pagination engine.

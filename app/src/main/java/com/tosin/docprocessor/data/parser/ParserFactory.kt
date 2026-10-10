@@ -3,7 +3,7 @@ package com.tosin.docprocessor.data.parser
 import android.content.Context
 import com.tosin.docprocessor.data.parser.docx.DocxParser
 import com.tosin.docprocessor.data.parser.odt.OdtParser
-import com.tosin.docprocessor.data.common.model.MimeTypes
+import com.tosin.docprocessor.domain.model.MimeTypes
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 

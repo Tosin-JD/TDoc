@@ -1,7 +1,7 @@
 package com.tosin.docprocessor.data.parser
 
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.domain.model.DocumentElement
 import java.io.InputStream
 import java.io.OutputStream
 

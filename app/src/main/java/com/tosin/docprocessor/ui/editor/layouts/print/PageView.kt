@@ -26,9 +26,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.core.rendering.PrintElementRenderer
-import com.tosin.docprocessor.data.common.model.DocumentElement
-import com.tosin.docprocessor.data.common.model.layout.PageModel
-import com.tosin.docprocessor.data.common.model.layout.PositionedElement
+import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.model.layout.PageModel
+import com.tosin.docprocessor.domain.model.layout.PositionedElement
 import com.tosin.docprocessor.domain.pagination.UnitConverter
 import com.tosin.docprocessor.ui.editor.EditorViewModel
 import kotlin.math.min

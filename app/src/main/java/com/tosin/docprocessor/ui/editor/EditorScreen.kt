@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Comment
@@ -53,8 +52,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.tosin.docprocessor.data.common.model.EditorMode
-import com.tosin.docprocessor.data.common.model.ViewMode
+import com.tosin.docprocessor.domain.model.EditorMode
+import com.tosin.docprocessor.domain.model.ViewMode
 import com.tosin.docprocessor.ui.components.EditorMoreMenu
 import com.tosin.docprocessor.ui.components.EditorToolbar
 import com.tosin.docprocessor.ui.editor.layouts.MobileLayout

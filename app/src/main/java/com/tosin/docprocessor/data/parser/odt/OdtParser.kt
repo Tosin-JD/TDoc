@@ -1,7 +1,7 @@
 package com.tosin.docprocessor.data.parser.odt
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
-import com.tosin.docprocessor.data.common.model.MimeTypes
+import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.model.MimeTypes
 import com.tosin.docprocessor.data.parser.DocumentParser
 import com.tosin.docprocessor.data.parser.exception.ParseErrorContext
 import com.tosin.docprocessor.data.parser.exception.ParseException

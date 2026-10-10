@@ -1,4 +1,4 @@
-package com.tosin.docprocessor.data.common.model.layout
+package com.tosin.docprocessor.domain.model.layout
 
 /**
  * A "Ready-to-Paint" snapshot of a single sheet of paper.

@@ -1,4 +1,4 @@
-package com.tosin.docprocessor.data.common.model
+package com.tosin.docprocessor.domain.model
 
 import com.tosin.docprocessor.data.parser.internal.models.*
 import java.util.UUID

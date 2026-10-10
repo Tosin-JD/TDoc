@@ -1,6 +1,6 @@
 package com.tosin.docprocessor.domain.pagination
 
-import com.tosin.docprocessor.data.common.model.DocumentElement
+import com.tosin.docprocessor.domain.model.DocumentElement
 
 /**
  * Cache that stores the measured height of every DocumentElement.
