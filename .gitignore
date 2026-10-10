@@ -62,3 +62,10 @@ app/build/
 # Test reports
 /test-reports/
 /coverage-reports/
+
+
+# Misceleneous files
+TODO[0-9]*.md
+TASK[0-9]*.md
+REPORT[0-9]*.md
+IMPLEMENTATION_PLAN[0-9]*.md
