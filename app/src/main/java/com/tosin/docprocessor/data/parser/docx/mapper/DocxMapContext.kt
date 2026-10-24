@@ -21,6 +21,9 @@ class DocxMapContext(
     val theme: DocxThemeResolver = DocxThemeResolver.none(),
     val evenAndOddHeaders: Boolean = false
 ) {
+    /** Current text-box nesting depth (recursion guard for `w:txbxContent` / `v:textbox`). */
+    var textBoxDepth: Int = 0
+
     fun relationships(): Map<String, DocxPackage.Relationship> = opc.relationshipsFor(part)
 
     fun relationshipBySuffix(suffix: String): DocxPackage.Relationship? =

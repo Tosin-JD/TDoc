@@ -4,6 +4,8 @@ import com.tosin.docprocessor.data.parser.common.ListMarkerFormatter
 import com.tosin.docprocessor.data.parser.common.Ns
 import com.tosin.docprocessor.data.parser.common.OpaqueFragmentCapture
 import com.tosin.docprocessor.data.parser.common.attrNs
+import com.tosin.docprocessor.data.parser.common.descendantsNs
+import com.tosin.docprocessor.data.parser.common.elementsNs
 import com.tosin.docprocessor.data.parser.common.firstNs
 import com.tosin.docprocessor.data.parser.common.matchesNs
 import com.tosin.docprocessor.domain.document.model.BlockNode
@@ -31,6 +33,23 @@ class OdfBlockMapper(
             if (child !is Element) continue
             if (child.matchesNs(Ns.TEXT, "tracked-changes")) {
                 output += revisionBlocks(child, depth)
+                continue
+            }
+            if (child.matchesNs(Ns.TEXT, "section")) {
+                val masterPageName = context.styles.masterPageForSectionStyle(
+                    child.attrNs(Ns.TEXT, "style-name")
+                ) ?: child.attrNs(Ns.STYLE, "master-page-name")
+                if (masterPageName != null) {
+                    output += BlockNode.SectionBreak(
+                        style = com.tosin.docprocessor.domain.document.model.style.SectionStyle(
+                            masterPageName = masterPageName,
+                            page = context.styles.pageStyleForMasterPage(masterPageName)
+                                ?: com.tosin.docprocessor.domain.document.model.style.PageStyle()
+                        ),
+                        anchor = SourceAnchor(context.part, "text:section")
+                    )
+                }
+                output += parseBlocks(child, depth)
                 continue
             }
             parseBlock(child, depth)?.let { output += it }
@@ -74,15 +93,11 @@ class OdfBlockMapper(
         element.matchesNs(Ns.TEXT, "list") -> list(element, depth)
         element.matchesNs(Ns.TABLE, "table") -> tableMapper.parseTable(element)
         element.matchesNs(Ns.DRAW, "frame") -> frameMapper.parseBlockFrame(element)
-        element.matchesNs(Ns.TEXT, "section") -> {
-            val nested = parseBlocks(element, depth)
-            nested.takeIf { it.isNotEmpty() }
-                ?.let { BlockNode.TextBox(blocks = it, anchor = SourceAnchor(context.part, "text:section")) }
-        }
         element.matchesNs(Ns.TEXT, "soft-page-break") ->
             BlockNode.PageBreak(SourceAnchor(context.part, "text:soft-page-break"))
         element.matchesNs(Ns.TEXT, "insertion") || element.matchesNs(Ns.TEXT, "deletion") ->
             revisionBlock(element, depth)
+        element.matchesNs(Ns.TEXT, "definition-list") -> definitionList(element, depth)
         element.matchesNs(Ns.TEXT, "table-of-content") || element.matchesNs(Ns.TEXT, "alphabetical-index") ||
             element.matchesNs(Ns.TEXT, "illustration-index") || element.matchesNs(Ns.TEXT, "table-index") ||
             element.matchesNs(Ns.TEXT, "object-index") || element.matchesNs(Ns.TEXT, "user-index") ||
@@ -115,6 +130,15 @@ class OdfBlockMapper(
 
     private fun list(element: Element, depth: Int): BlockNode.ListBlock {
         val listStyle = context.styles.listStyle(element.attrNs(Ns.TEXT, "style-name"))
+        val key = listStyle.styleId ?: listStyle.styleName ?: ODF_ANONYMOUS_LIST_KEY
+        val start = element.attrNs(Ns.TEXT, "start")?.toIntOrNull()
+            ?: element.attrNs(Ns.TEXT, "start-value")?.toIntOrNull()
+        val restart = element.attrNs(Ns.TEXT, "restart")?.let {
+            it.equals("true", true) || it == "1"
+        } == true
+        if (start != null || restart) {
+            context.listNumbering.restart(key, depth - 1, (start ?: 1) - 1)
+        }
         val items = mutableListOf<BlockNode.ListItem>()
         val children = element.childNodes
         for (index in 0 until children.length) {
@@ -178,7 +202,46 @@ class OdfBlockMapper(
             element.matchesNs(Ns.TEXT, "bibliography") -> IndexKind.BIBLIOGRAPHY
             else -> IndexKind.TABLE_OF_CONTENTS
         }
-        return BlockNode.IndexBlock(kind, anchor = SourceAnchor(context.part, "text:index"))
+        val titleContainer = element.descendantsNs(Ns.TEXT, "index-title").firstOrNull()
+        val title = titleContainer?.descendantsNs(Ns.TEXT, "p")?.firstOrNull()
+            ?.textContent?.trim()?.takeIf { it.isNotEmpty() }
+        val entries = element.descendantsNs(Ns.TEXT, "index-entry")
+            .mapNotNull { entry ->
+                val text = entry.descendantsNs(Ns.TEXT, "index-entry-text")
+                    .joinToString("") { it.textContent.orEmpty() }
+                    .ifBlank { entry.textContent.orEmpty() }
+                    .trim()
+                text.takeIf { it.isNotEmpty() }
+            }
+        return BlockNode.IndexBlock(
+            kind,
+            title = title,
+            entries = entries,
+            anchor = SourceAnchor(context.part, "text:index")
+        )
+    }
+
+    private fun definitionList(element: Element, depth: Int): BlockNode {
+        val items = element.elementsNs(Ns.TEXT, "definition").mapNotNull { definition ->
+            val term = definition.firstNs(Ns.TEXT, "term")
+            val body = definition.elementsNs(Ns.TEXT, "definition").firstOrNull()
+            if (term == null || body == null) return@mapNotNull null
+            val termBlock = BlockNode.Paragraph(
+                inlines = inlineMapper.parse(term, TextStyle()),
+                anchor = SourceAnchor(context.part, "text:term")
+            )
+            val bodyBlocks = parseBlocks(body, depth + 1)
+            BlockNode.ListItem(
+                blocks = listOf(termBlock) + bodyBlocks,
+                anchor = SourceAnchor(context.part, "text:definition")
+            )
+        }
+        if (items.isEmpty()) return opaque(element)
+        return BlockNode.ListBlock(
+            kind = ListKind.UNORDERED,
+            items = items,
+            anchor = SourceAnchor(context.part, "text:definition-list")
+        )
     }
 
     private fun opaque(element: Element): BlockNode {

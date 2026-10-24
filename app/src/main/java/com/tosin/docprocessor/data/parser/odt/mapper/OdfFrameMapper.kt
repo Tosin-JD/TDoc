@@ -45,12 +45,7 @@ class OdfFrameMapper(private val context: OdfMapContext) {
                 anchor = SourceAnchor(context.part, "draw:text-box")
             )
         }
-        context.diagnostics.preserve("draw:frame", "inline")
-        return InlineNode.Opaque(
-            com.tosin.docprocessor.data.parser.common.OpaqueFragmentCapture.capture(
-                frame, SourceAnchor(context.part, "draw:frame"), "frame not rendered inline"
-            )
-        )
+        return InlineNode.Opaque(opaqueFrame(frame, "inline"))
     }
 
     fun parseBlockFrame(frame: Element): BlockNode {
@@ -61,6 +56,10 @@ class OdfFrameMapper(private val context: OdfMapContext) {
                 return BlockNode.Figure(
                     frameStyle = frameStyle(frame),
                     resourceId = resourceId,
+                    caption = frame.firstNs(Ns.DRAW, "caption")?.textContent?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { listOf(InlineNode.Text(it)) }
+                        .orEmpty(),
                     altText = title(frame, "desc"),
                     title = title(frame, "title"),
                     anchor = SourceAnchor(context.part, "draw:frame")
@@ -71,14 +70,36 @@ class OdfFrameMapper(private val context: OdfMapContext) {
         if (textBox != null && ::blockMapper.isInitialized) {
             return BlockNode.TextBox(
                 blocks = blockMapper.parseBlocks(textBox),
+                frameStyle = frameStyle(frame),
                 anchor = SourceAnchor(context.part, "draw:text-box")
             )
         }
-        context.diagnostics.preserve("draw:frame", "block")
-        return BlockNode.Opaque(
-            com.tosin.docprocessor.data.parser.common.OpaqueFragmentCapture.capture(
-                frame, SourceAnchor(context.part, "draw:frame"), "frame not rendered"
-            )
+        return BlockNode.Opaque(opaqueFrame(frame, "block"))
+    }
+
+    private fun opaqueFrame(
+        frame: Element,
+        location: String
+    ): com.tosin.docprocessor.domain.document.model.OpaqueNode {
+        val chart = frame.firstNs(Ns.DRAW, "chart")
+        val objectElement = frame.firstNs(Ns.DRAW, "object")
+            ?: frame.firstNs(Ns.DRAW, "object-ole")
+        val title = chart?.firstNs(Ns.SVG, "title")?.textContent?.trim()?.takeIf { it.isNotEmpty() }
+        val classId = objectElement?.attrNs(Ns.DRAW, "class-id")
+        val objectName = objectElement?.attrNs(Ns.DRAW, "name")
+        val objectMetadata = classId?.let { "class-id=$it" }
+            ?: objectName?.let { "name=$it" }
+        val reason = when {
+            chart != null && title != null -> "chart not rendered; title: $title"
+            chart != null -> "chart not rendered"
+            objectElement != null && objectMetadata != null -> "embedded object not rendered; $objectMetadata"
+            objectElement != null -> "embedded object not rendered"
+            location == "inline" -> "frame not rendered inline"
+            else -> "frame not rendered"
+        }
+        context.diagnostics.preserve("draw:frame", location)
+        return com.tosin.docprocessor.data.parser.common.OpaqueFragmentCapture.capture(
+            frame, SourceAnchor(context.part, "draw:frame"), reason
         )
     }
 
@@ -97,8 +118,10 @@ class OdfFrameMapper(private val context: OdfMapContext) {
         } else FrameAnchor.ANCHORED,
         widthPoints = Units.parseOdfLength(frame.attrNs(Ns.SVG, "width")),
         heightPoints = Units.parseOdfLength(frame.attrNs(Ns.SVG, "height")),
-        positionXPoints = Units.parseOdfLength(frame.attrNs(Ns.SVG, "x")),
-        positionYPoints = Units.parseOdfLength(frame.attrNs(Ns.SVG, "y")),
+        positionXPoints = if (frame.attrNs(Ns.TEXT, "anchor-type")?.contains("as-char") == true) null
+            else Units.parseOdfLength(frame.attrNs(Ns.SVG, "x")),
+        positionYPoints = if (frame.attrNs(Ns.TEXT, "anchor-type")?.contains("as-char") == true) null
+            else Units.parseOdfLength(frame.attrNs(Ns.SVG, "y")),
         rotationDegrees = rotationOf(frame),
         wrapStyle = wrapStyleOf(frame),
         zOrder = frame.attrNs(Ns.DRAW, "z-index")?.toIntOrNull()

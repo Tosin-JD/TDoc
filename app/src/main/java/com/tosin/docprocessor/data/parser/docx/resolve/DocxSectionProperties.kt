@@ -24,7 +24,7 @@ object DocxSectionProperties {
         }
         val equalWidth = cols?.wAttr("equalWidth")?.let { it == "1" || it == "true" } ?: true
         val columnWidths = if (equalWidth) emptyList() else {
-            cols?.w("gridCol")?.map { Units.twipsToPoints(it.wAttr("w")?.toIntOrNull()) }.orEmpty()
+            cols?.w("col")?.map { Units.twipsToPoints(it.wAttr("w")?.toIntOrNull()) }.orEmpty()
         }
         return SectionStyle(
             index = index,

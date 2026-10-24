@@ -24,9 +24,9 @@ object DocxRunProperties {
         val shading = rPr.wFirst("shd")
         return TextStyle(
             fontAscii = rFonts?.wAttr("ascii") ?: rFonts?.wAttr("asciiTheme"),
-            fontHAnsi = rFonts?.wAttr("hAnsi"),
-            fontEastAsia = rFonts?.wAttr("eastAsia"),
-            fontComplexScript = rFonts?.wAttr("cs"),
+            fontHAnsi = rFonts?.wAttr("hAnsi") ?: rFonts?.wAttr("hAnsiTheme"),
+            fontEastAsia = rFonts?.wAttr("eastAsia") ?: rFonts?.wAttr("eastAsiaTheme"),
+            fontComplexScript = rFonts?.wAttr("cs") ?: rFonts?.wAttr("cstheme"),
             fontSizePoints = Units.halfPointsToPoints(rPr.wFirst("sz")?.wAttr("val")?.toIntOrNull()),
             bold = onOff(rPr.wFirst("b")),
             italic = onOff(rPr.wFirst("i")),
@@ -36,6 +36,8 @@ object DocxRunProperties {
             verticalAlign = verticalAlign(rPr.wFirst("vertAlign")),
             color = color?.wAttr("val")?.takeUnless { it.equals("auto", true) },
             colorTheme = color?.wAttr("themeColor"),
+            colorThemeTint = color?.wAttr("themeTint"),
+            colorThemeShade = color?.wAttr("themeShade"),
             highlight = rPr.wFirst("highlight")?.wAttr("val"),
             shading = shading?.let {
                 Shading(fill = it.wAttr("fill"), color = it.wAttr("color"), pattern = it.wAttr("val"))

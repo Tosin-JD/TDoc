@@ -7,7 +7,9 @@ import com.tosin.docprocessor.data.parser.common.ListBlockGrouper
 import com.tosin.docprocessor.data.parser.common.Ns
 import com.tosin.docprocessor.data.parser.common.PackageInventoryBuilder
 import com.tosin.docprocessor.data.parser.common.ResourceCollector
+import com.tosin.docprocessor.data.parser.common.descendantsNs
 import com.tosin.docprocessor.data.parser.common.firstNs
+import com.tosin.docprocessor.data.parser.common.rAttr
 import com.tosin.docprocessor.data.parser.common.wAttr
 import com.tosin.docprocessor.data.parser.common.wFirst
 import com.tosin.docprocessor.data.parser.docx.mapper.DocxBlockMapper
@@ -16,6 +18,9 @@ import com.tosin.docprocessor.data.parser.docx.mapper.DocxMetadataMapper
 import com.tosin.docprocessor.data.parser.docx.mapper.DocxSectionMapper
 import com.tosin.docprocessor.data.parser.docx.mapper.DocxTableMapper
 import com.tosin.docprocessor.data.parser.docx.opc.OpcPackage
+import com.tosin.docprocessor.data.parser.docx.opc.ContentTypes
+import com.tosin.docprocessor.data.parser.exception.ParseErrorContext
+import com.tosin.docprocessor.data.parser.exception.ParseException
 import com.tosin.docprocessor.data.parser.docx.resolve.DocxNumberingResolver
 import com.tosin.docprocessor.data.parser.docx.resolve.DocxSectionProperties
 import com.tosin.docprocessor.data.parser.docx.resolve.DocxStyleResolver
@@ -65,8 +70,16 @@ class DocxDocumentParser(
     }
 
     fun parseEntries(entries: Map<String, ByteArray>): ParseResult {
-        if (entries.containsKey("EncryptedPackage") || entries.containsKey("EncryptionInfo")) {
-            throw IllegalArgumentException("Encrypted DOCX documents are not supported")
+        val encryptedContentType = ContentTypes.parse(entries["[Content_Types].xml"])
+            .let { types -> (types.defaults.values + types.overrides.values) }
+            .any { it.contains("encryptedPackage", ignoreCase = true) }
+        if (entries.keys.any { it.equals("EncryptedPackage", true) || it.equals("EncryptionInfo", true) } ||
+            encryptedContentType
+        ) {
+            throw ParseException(
+                "Encrypted DOCX documents are not supported",
+                ParseErrorContext(fileName = "EncryptedPackage")
+            )
         }
         val opc = OpcPackage.parse(entries, diagnostics)
         val mainPart = opc.mainDocumentPart()
@@ -100,6 +113,19 @@ class DocxDocumentParser(
         val grouped = ListBlockGrouper.group(bodyBlocks) { numId ->
             numbering.asListStyle(styleId = null, numId = numId)
         }
+        val background = document.documentElement?.wFirst("background")
+        val backgroundColor = background?.wAttr("fill")?.takeIf { it.isNotBlank() }
+        val backgroundRelationshipId = background?.rAttr("id")
+            ?: background?.descendantsNs(Ns.VML, "fill")?.firstOrNull()?.rAttr("id")
+        val backgroundImage = backgroundRelationshipId?.let { relationshipId ->
+            opc.relationshipsFor(mainPart)[relationshipId]
+        }?.let { relationship ->
+            if (relationship.isExternal) {
+                resources.add(relationship.target, isExternal = true)
+            } else {
+                resources.add(relationship.target, bytes = opc.part(relationship.target))
+            }
+        }
         // The document-level sectPr closes the final section in flow.
         val blocks = body.wFirst("sectPr")?.let { sectPr ->
             grouped + BlockNode.SectionBreak(
@@ -109,12 +135,26 @@ class DocxDocumentParser(
                 anchor = SourceAnchor(mainPart, "w:sectPr")
             )
         } ?: grouped
+        val blocksWithBackground = blocks.map { block ->
+            if (block is BlockNode.SectionBreak && (backgroundColor != null || backgroundImage != null)) {
+                block.copy(
+                    style = block.style.copy(
+                        page = block.style.page.copy(
+                            background = backgroundColor ?: block.style.page.background,
+                            backgroundImageResourceId = backgroundImage ?: block.style.page.backgroundImageResourceId
+                        )
+                    )
+                )
+            } else block
+        }
 
         val sections = sectionMapper.collectSections(body, settings).map { section ->
-            document.documentElement?.wFirst("background")?.wAttr("fill")
-                ?.takeIf { it.isNotBlank() }
-                ?.let { section.copy(page = section.page.copy(background = it)) }
-                ?: section
+            section.copy(
+                page = section.page.copy(
+                    background = backgroundColor ?: section.page.background,
+                    backgroundImageResourceId = backgroundImage ?: section.page.backgroundImageResourceId
+                )
+            )
         }
         val headerFooters = sectionMapper.parseHeaderFooters(body, settings)
         val comments = sectionMapper.parseComments(opc.document("word/comments.xml"))
@@ -128,7 +168,7 @@ class DocxDocumentParser(
         diagnostics.merge(partDiagnostics)
 
         val parsed = ParsedDocument(
-            blocks = blocks,
+            blocks = blocksWithBackground,
             metadata = metadata,
             styles = styleResolver.catalogue(),
             resources = resources.resources(),
@@ -141,7 +181,7 @@ class DocxDocumentParser(
             diagnostics = diagnostics.diagnostics,
             compatibility = diagnostics.compatibilityLevel(),
             opaqueParts = preservedParts(opc),
-            outline = ParsedDocument.outlineOf(blocks)
+            outline = ParsedDocument.outlineOf(blocksWithBackground)
         )
 
         return ParseResult(
@@ -159,7 +199,10 @@ class DocxDocumentParser(
     }.toSet()
 
     private fun preservedParts(opc: OpcPackage): List<OpaquePackagePart> = entries
-        .filterKeys { opc.contentTypes.contentTypeFor(it) == null && it != "[Content_Types].xml" && !it.endsWith(".rels") }
+        .filterKeys {
+            it.startsWith("word/glossary/") ||
+                (opc.contentTypes.contentTypeFor(it) == null && it != "[Content_Types].xml" && !it.endsWith(".rels"))
+        }
         .map { (path, bytes) ->
             OpaquePackagePart(
                 path = path,

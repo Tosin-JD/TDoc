@@ -53,34 +53,10 @@ class DocxBlockMapper(private val context: DocxMapContext) {
                     if (content != null) blocks += parseBlocks(content)
                     else context.diagnostics.preserve("w:sdt", "block")
                 }
-                child.matchesNs(Ns.W, "ins") -> blocks += BlockNode.RevisionBlock(
-                    kind = RevisionKind.INSERTION,
-                    author = child.getAttributeNS(Ns.W, "author").takeIf { it.isNotBlank() },
-                    date = child.getAttributeNS(Ns.W, "date").takeIf { it.isNotBlank() },
-                    blocks = parseBlocks(child),
-                    anchor = SourceAnchor(context.part, "w:ins")
-                )
-                child.matchesNs(Ns.W, "del") -> blocks += BlockNode.RevisionBlock(
-                    kind = RevisionKind.DELETION,
-                    author = child.getAttributeNS(Ns.W, "author").takeIf { it.isNotBlank() },
-                    date = child.getAttributeNS(Ns.W, "date").takeIf { it.isNotBlank() },
-                    blocks = parseBlocks(child),
-                    anchor = SourceAnchor(context.part, "w:del")
-                )
-                child.matchesNs(Ns.W, "moveFrom") -> blocks += BlockNode.RevisionBlock(
-                    kind = RevisionKind.MOVE_FROM,
-                    author = child.getAttributeNS(Ns.W, "author").takeIf { it.isNotBlank() },
-                    date = child.getAttributeNS(Ns.W, "date").takeIf { it.isNotBlank() },
-                    blocks = parseBlocks(child),
-                    anchor = SourceAnchor(context.part, "w:moveFrom")
-                )
-                child.matchesNs(Ns.W, "moveTo") -> blocks += BlockNode.RevisionBlock(
-                    kind = RevisionKind.MOVE_TO,
-                    author = child.getAttributeNS(Ns.W, "author").takeIf { it.isNotBlank() },
-                    date = child.getAttributeNS(Ns.W, "date").takeIf { it.isNotBlank() },
-                    blocks = parseBlocks(child),
-                    anchor = SourceAnchor(context.part, "w:moveTo")
-                )
+                child.matchesNs(Ns.W, "ins") -> blocks += revisionBlock(RevisionKind.INSERTION, child, "w:ins")
+                child.matchesNs(Ns.W, "del") -> blocks += revisionBlock(RevisionKind.DELETION, child, "w:del")
+                child.matchesNs(Ns.W, "moveFrom") -> blocks += revisionBlock(RevisionKind.MOVE_FROM, child, "w:moveFrom")
+                child.matchesNs(Ns.W, "moveTo") -> blocks += revisionBlock(RevisionKind.MOVE_TO, child, "w:moveTo")
                 child.matchesNs(Ns.W, "sectPr") -> Unit // handled by the document mapper
                 child.matchesNs(Ns.W, "altChunk") -> {
                     context.diagnostics.preserve("w:altChunk", "body")
@@ -105,4 +81,17 @@ class DocxBlockMapper(private val context: DocxMapContext) {
         }
         return blocks
     }
+
+    /**
+     * Wraps a block-level revision container (`w:ins`/`w:del`/`w:moveFrom`/`w:moveTo`)
+     * into a [BlockNode.RevisionBlock], preserving author/date attribution (F11/F12).
+     */
+    private fun revisionBlock(kind: RevisionKind, element: Element, localName: String): BlockNode.RevisionBlock =
+        BlockNode.RevisionBlock(
+            kind = kind,
+            author = element.getAttributeNS(Ns.W, "author").takeIf { it.isNotBlank() },
+            date = element.getAttributeNS(Ns.W, "date").takeIf { it.isNotBlank() },
+            blocks = parseBlocks(element),
+            anchor = SourceAnchor(context.part, localName)
+        )
 }

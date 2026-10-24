@@ -17,6 +17,7 @@ import com.tosin.docprocessor.domain.document.model.style.PageStyle
 import com.tosin.docprocessor.domain.document.model.style.ParagraphStyle
 import com.tosin.docprocessor.domain.document.model.style.Shading
 import com.tosin.docprocessor.domain.document.model.style.TableStyle
+import com.tosin.docprocessor.domain.document.model.style.TabStop
 import com.tosin.docprocessor.domain.document.model.style.TextAlignment
 import com.tosin.docprocessor.domain.document.model.style.TextStyle
 import com.tosin.docprocessor.domain.document.model.style.UnderlineKind
@@ -59,7 +60,9 @@ object OdfTextProperties {
                 else -> null
             },
             letterSpacingPoints = Units.parseOdfLength(props.attrNs(Ns.FO, "letter-spacing")),
-            language = props.attrNs(Ns.FO, "language")
+            language = props.attrNs(Ns.FO, "language"),
+            direction = props.attrNs(Ns.FO, "direction")
+                ?: props.attrNs(Ns.STYLE, "writing-mode")
         )
     }
 
@@ -84,8 +87,16 @@ object OdfTextProperties {
 
 object OdfParagraphProperties {
     fun parse(styleElement: Element): ParagraphStyle {
-        val props = styleElement.firstNs(Ns.STYLE, "paragraph-properties") ?: return ParagraphStyle()
+        val props = styleElement.firstNs(Ns.STYLE, "paragraph-properties")
+            ?: return ParagraphStyle(
+                styleName = styleElement.attrNs(Ns.STYLE, "name"),
+                basedOn = styleElement.attrNs(Ns.STYLE, "parent-style-name"),
+                next = styleElement.attrNs(Ns.STYLE, "next-style-name"),
+                masterPageName = styleElement.attrNs(Ns.STYLE, "master-page-name")
+            )
         val indent = Units.parseOdfLength(props.attrNs(Ns.FO, "text-indent"))
+        val tabStops = props.firstNs(Ns.STYLE, "tab-stops")?.elementsNs(Ns.STYLE, "tab-stop")
+            ?: props.elementsNs(Ns.STYLE, "tab-stop")
         return ParagraphStyle(
             styleName = styleElement.attrNs(Ns.STYLE, "name"),
             basedOn = styleElement.attrNs(Ns.STYLE, "parent-style-name"),
@@ -100,10 +111,25 @@ object OdfParagraphProperties {
             lineSpacing = lineSpacing(props.attrNs(Ns.FO, "line-height")),
             lineSpacingRule = lineSpacingRule(props.attrNs(Ns.FO, "line-height")),
             keepNext = boolean(props.attrNs(Ns.FO, "keep-with-next")),
+            keepLines = boolean(props.attrNs(Ns.FO, "keep-together")),
             pageBreakBefore = props.attrNs(Ns.FO, "break-before")?.contains("page") == true,
+            tabs = tabStops.mapNotNull { tab ->
+                val position = Units.parseOdfLength(tab.attrNs(Ns.STYLE, "position")) ?: return@mapNotNull null
+                TabStop(
+                    positionPoints = position,
+                    alignment = tab.attrNs(Ns.STYLE, "type"),
+                    leader = tab.attrNs(Ns.STYLE, "leader-style")
+                )
+            },
+            masterPageName = styleElement.attrNs(Ns.STYLE, "master-page-name")
+                ?: props.attrNs(Ns.STYLE, "master-page-name"),
             shading = props.attrNs(Ns.FO, "background-color")?.let { Shading(fill = it) },
             borders = props.attrNs(Ns.FO, "border")?.let { listOf(parseBorder(it)) }.orEmpty(),
-            defaultRunStyle = OdfTextProperties.parse(styleElement).takeIf { it != TextStyle() }
+            defaultRunStyle = OdfTextProperties.parse(styleElement).let { runStyle ->
+                val direction = props.attrNs(Ns.FO, "direction")
+                    ?: props.attrNs(Ns.STYLE, "writing-mode")
+                if (direction == null) runStyle else runStyle.copy(direction = direction)
+            }.takeIf { it != TextStyle() }
         )
     }
 
@@ -229,7 +255,8 @@ object OdfPageProperties {
                 headerPoints = Units.parseOdfLength(props.attrNs(Ns.STYLE, "header-height")),
                 footerPoints = Units.parseOdfLength(props.attrNs(Ns.STYLE, "footer-height"))
             ),
-            columns = props.attrNs(Ns.STYLE, "columns")?.toIntOrNull()
+            columns = props.attrNs(Ns.STYLE, "columns")?.toIntOrNull(),
+            background = props.attrNs(Ns.FO, "background-color")
         )
     }
 }

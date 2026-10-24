@@ -39,7 +39,10 @@ class DocxThemeResolver private constructor(
     }
 
     /** Returns the concrete hex color for a theme color name, or null. */
-    fun color(themeColor: String?): String? = themeColor?.lowercase()?.let(palette::get)
+    fun color(themeColor: String?, tint: String? = null, shade: String? = null): String? {
+        val base = themeColor?.lowercase()?.let(palette::get) ?: return null
+        return transformColor(base, tint, shade)
+    }
 
     /** Substitutes theme font names and theme colors on a resolved run style. */
     fun resolve(style: TextStyle): TextStyle {
@@ -57,9 +60,26 @@ class DocxThemeResolver private constructor(
                 }
             }
         if (result.color == null && style.colorTheme != null) {
-            color(style.colorTheme)?.let { result = result.copy(color = it) }
+            color(style.colorTheme, style.colorThemeTint, style.colorThemeShade)
+                ?.let { result = result.copy(color = it) }
         }
         return result
+    }
+
+    private fun transformColor(hex: String, tint: String?, shade: String?): String? {
+        val rgb = hex.removePrefix("#").takeIf { it.length == 6 }?.toIntOrNull(16) ?: return null
+        val channels = intArrayOf((rgb shr 16) and 0xff, (rgb shr 8) and 0xff, rgb and 0xff)
+        val tintValue = tint?.toIntOrNull(16)?.div(255.0)
+        val shadeValue = shade?.toIntOrNull(16)?.div(255.0)
+        for (index in channels.indices) {
+            val value = when {
+                tintValue != null -> channels[index] + (255 - channels[index]) * tintValue
+                shadeValue != null -> channels[index] * shadeValue
+                else -> channels[index].toDouble()
+            }.toInt().coerceIn(0, 255)
+            channels[index] = value
+        }
+        return channels.joinToString("") { "%02X".format(it) }
     }
 
     companion object {

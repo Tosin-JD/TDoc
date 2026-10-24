@@ -61,13 +61,13 @@ blockers are cross-referenced to **F1–F28** in `parser_progress.md`.
 | Standard page boxes: Letter (612×792pt) and A4 (595×842pt) defaults | ✅ | `PageDimensions.Letter` / `.A4` |
 | twips → points conversion for page size and margins | ✅ | `SectionResolver` (1 twip = 0.05pt), tested (`SectionResolverTest`) |
 | Margins applied as the real content box (body rect) | ✅ | `PageDimensions.bodyRect`, tested (`PageDimensionsTest`) |
-| **Document's own page size/margins actually driving layout** | ❌ | **Critical:** the rich parse path never emits `DocumentElement.Section` (parsers put sections in `ParsedDocument.sections`; `LegacyElementAdapter` only projects `BlockNode.SectionBreak`, which no parser creates). `PrintLayout` therefore always falls back to A4 + 72pt margins regardless of the file. |
-| Landscape/portrait orientation | 🟡 | `pgSz w/h` used directly (Word stores oriented dims, so DOCX landscape works *if* geometry is wired); ODF `print-orientation` parsed into `PageStyle` but never reaches the renderer (same Section-projection gap) |
+| **Document's own page size/margins actually driving layout** | ❌ | Parsers now emit in-flow `BlockNode.SectionBreak`s and `LegacyElementAdapter` projects them; `PrintLayout`/`PrintPaginator` still need to consume section elements to drive page geometry. |
+| Landscape/portrait orientation | 🟡 | Page orientation and ODF master-page geometry are parsed and projected; renderer still needs to apply them when switching sections. |
 | Header/footer distance from page edge (`pgMar header/footer`) | ❌ | Parsed as `PageStyle.headerPoints/footerPoints`; `SectionResolver`/`EdgeInsets` ignore it — header sits at `marginTop` |
 | Gutter margin | ❌ | Parsed (`gutterPoints`), never applied |
 | Multi-column page layout (`w:cols num>1`) | ❌ | `columnCount` parsed; paginator is strictly single-column |
 | Page background color/image | ❌ | Paper is always a fixed Surface color |
-| Per-section geometry switch mid-document | 🟡 | `PrintPaginator` handles `DocumentElement.Section` (flushes page, applies new dims) but the elements never arrive (see row 4) — effectively dead code today |
+| Per-section geometry switch mid-document | 🟡 | `PrintPaginator` can consume `DocumentElement.Section`; parser projection now emits these elements, but end-to-end geometry application remains to be validated/fixed in rendering. |
 
 ## B. Pagination engine & page count
 
@@ -110,7 +110,7 @@ blockers are cross-referenced to **F1–F28** in `parser_progress.md`.
 | Hidden text (`w:vanish`) excluded from layout | ❌ | `isHidden` parsed; builder still appends the text |
 | Kerning | ❌ | Parsed, not applied |
 | Language / RTL paragraph direction | ❌ | Parsed, not applied |
-| Theme colors (`themeColor` → theme1.xml palette) | ❌ | Parser gap (parser_progress D) — runs fall back to black |
+| Theme colors (`themeColor` → theme1.xml palette) | ❌ | Parser resolves the theme palette and tint/shade; renderer still needs to honor the resulting color consistently. |
 | Superscript / subscript | ➖ | Already applied in both render paths; explicitly out of scope per requirements |
 
 ## D. Paragraph layout
@@ -136,8 +136,8 @@ blockers are cross-referenced to **F1–F28** in `parser_progress.md`.
 | List label (bullet/number) in **mobile** view | ✅ | `DocumentTextStyleMapper` prepends `listLabel` |
 | List label in **print/WYSIWYG** view | ❌ | `TextMeasurer.buildParagraphLayout` builds only from `spans` — bullets/numbers are **invisible in print preview** (measurement matches, but nothing is drawn). The edit overlay does prepend it, so preview and edit disagree |
 | Marker text (bullet glyph, "1.") supplied by parser | ✅ | numbering resolver (see parser_progress F) |
-| Sequential numbering per item (1, 2, 3…) | ❌ | Parser gap F2 — every item gets the start value |
-| Nested list structure/hierarchy | 🟡 | Indent rendered; DOCX nesting flattened at parse (parser F3) |
+| Sequential numbering per item (1, 2, 3…) | ❌ | Parser numbering state is implemented; print rendering still needs to draw the resolved markers. |
+| Nested list structure/hierarchy | 🟡 | Nested list blocks are parsed; legacy/render projection still flattens their hierarchy. |
 
 ## F. Tables
 
@@ -167,11 +167,11 @@ blockers are cross-referenced to **F1–F28** in `parser_progress.md`.
 | Alt text + caption under image | ✅ | Caption laid out + drawn; shared `ImageLayoutConfig` |
 | Missing-image placeholder box | ✅ | Crossed rectangle, never silent |
 | Horizontal placement of image | 🟡 | Always centered in the body column; Word places inline images at the current text position |
-| Floating/anchored images with text wrap | ❌ | Every image is a block-level flow item; `FrameStyle.wrapStyle/positionX/Y` never populated or honored (parser F14) |
+| Floating/anchored images with text wrap | ❌ | Parser supplies position/wrap/z-order; renderer still treats images as flow items and does not honor those values. |
 | Image rotation | ❌ | Parsed into `FrameStyle.rotationDegrees`, renderer ignores it |
 | Drawing/shape extent (size of non-image drawings) | 🟡 | `measureDrawing` reads `widthEmu/heightEmu`, but `LegacyElementAdapter` never fills them → default 200pt box + text placeholder |
-| Text boxes (`w:txbxContent`, `draw:text-box`) | ❌ | Inner blocks inlined into flow; no box, no position (parser F7/F8) |
-| Charts / SmartArt / OLE objects | ❌ | Placeholder or text stub (parser F23–F25) |
+| Text boxes (`w:txbxContent`, `draw:text-box`) | ❌ | Parser preserves nested box blocks and geometry; legacy/render projection still flattens them into flow text. |
+| Charts / SmartArt / OLE objects | ❌ | Parser preserves opaque XML plus descriptive metadata; rendering remains placeholder-only. |
 | VML legacy pictures | 🟡 | Parsed as images (parser ✅); rendering works only after resource materialization |
 
 ## H. Headers & footers
@@ -185,7 +185,7 @@ blockers are cross-referenced to **F1–F28** in `parser_progress.md`.
 | Header/footer distance from page edge | ❌ | Reservation measured from text, header anchored at `marginTop` (see A) |
 | Rich header/footer content (tables, images, styled runs) | ❌ | `LegacyElementAdapter` flattens stories to plain text; rendered at hardcoded 10pt |
 | Section-scoped header/footer assignment | 🟡 | Deduped globally; first/even variants resolved document-wide, not per section reference |
-| Field evaluation in headers/footers (PAGE, NUMPAGES, STYLEREF) | ❌ | Shows raw field text / placeholder (parser F19) |
+| Field evaluation in headers/footers (PAGE, NUMPAGES, STYLEREF) | ❌ | Pure `FieldEvaluator` exists; rendering has not yet supplied page/section context or invoked it. |
 | Footer page-number rendering ("Page 3 of 10") | ❌ | Not present anywhere |
 
 ## I. Non-content elements in the flow

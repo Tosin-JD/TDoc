@@ -1,6 +1,7 @@
 package com.tosin.docprocessor.data.parser.odt
 
 import com.tosin.docprocessor.data.parser.DocumentParser
+import com.tosin.docprocessor.data.parser.common.CaptionAttacher
 import com.tosin.docprocessor.data.parser.common.DiagnosticsCollector
 import com.tosin.docprocessor.data.parser.common.LegacyElementAdapter
 import com.tosin.docprocessor.data.parser.common.Ns
@@ -81,19 +82,21 @@ class OdtDocumentParser(
         val body = contentRoot.firstNs(Ns.OFFICE, "body")
         val text = body?.firstNs(Ns.OFFICE, "text")
             ?: throw IllegalArgumentException("Not a valid ODT: missing office:text body")
-        val blocks = blockMapper.parseBlocks(text)
+        val blocks = CaptionAttacher.attach(blockMapper.parseBlocks(text))
 
         val sectionMapper = OdfSectionMapper(context, blockMapper)
+        val sections = sectionMapper.collectSections(stylesRoot)
+        val boundBlocks = sectionMapper.bindBlocks(blocks, sections)
         val metadata = OdfMetadataMapper().parse(opc.document("meta.xml")?.documentElement)
         val settings = sectionMapper.parseSettings(opc.document("settings.xml")?.documentElement)
         diagnostics.merge(partDiagnostics)
 
         val parsed = ParsedDocument(
-            blocks = blocks,
+            blocks = boundBlocks,
             metadata = metadata,
             styles = styleResolver.catalogue(),
             resources = resources.resources(),
-            sections = sectionMapper.collectSections(stylesRoot),
+            sections = sections,
             headerFooters = sectionMapper.collectHeaderFooters(stylesRoot),
             comments = inlineMapper.collectedComments(),
             notes = inlineMapper.collectedNotes(),
@@ -102,7 +105,7 @@ class OdtDocumentParser(
             diagnostics = diagnostics.diagnostics,
             compatibility = diagnostics.compatibilityLevel(),
             opaqueParts = preservedParts(opc),
-            outline = ParsedDocument.outlineOf(blocks)
+            outline = ParsedDocument.outlineOf(boundBlocks)
         )
 
         return ParseResult(

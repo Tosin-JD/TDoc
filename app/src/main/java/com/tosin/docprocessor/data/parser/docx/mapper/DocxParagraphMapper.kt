@@ -31,11 +31,12 @@ class DocxParagraphMapper(private val context: DocxMapContext) {
         val resolvedStyle = context.styles.paragraphStyle(direct.styleId).mergedWith(direct)
         val baseRunStyle = resolvedStyle.defaultRunStyle ?: TextStyle()
         val inlines = parseInlineContainer(paragraph, baseRunStyle)
+        val revisionWrapped = formatChangeWrap(pPr, inlines)
 
         val headingLevel = headingLevel(direct, resolvedStyle)
         if (headingLevel != null && inlines.isNotEmpty()) {
             return BlockNode.Heading(
-                inlines = inlines,
+                inlines = revisionWrapped,
                 level = headingLevel,
                 style = resolvedStyle,
                 anchor = SourceAnchor(context.part, "w:p")
@@ -43,7 +44,6 @@ class DocxParagraphMapper(private val context: DocxMapContext) {
         }
 
         val listMarker = parseListMarker(pPr)
-        val revisionWrapped = formatChangeWrap(pPr, inlines)
         return BlockNode.Paragraph(
             inlines = revisionWrapped,
             style = resolvedStyle,
@@ -56,6 +56,10 @@ class DocxParagraphMapper(private val context: DocxMapContext) {
      *  formatting visible inside a FORMAT_CHANGE revision node. */
     private fun formatChangeWrap(pPr: Element?, inlines: List<InlineNode>): List<InlineNode> {
         val change = pPr?.wFirst("pPrChange") ?: return inlines
+        context.diagnostics.warning(
+            "w:pPrChange",
+            "Current paragraph formatting retained; old paragraph-property snapshot was not interpreted"
+        )
         return listOf(
             InlineNode.Revision(
                 kind = RevisionKind.FORMAT_CHANGE,

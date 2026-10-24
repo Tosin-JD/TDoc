@@ -41,44 +41,89 @@ class OdfInlineMapper(
 
     fun parse(container: Element, style: TextStyle): List<InlineNode> {
         val output = mutableListOf<InlineNode>()
-        // Open tracked-change range (`text:change-start` … `text:change-end`).
-        var changeBuffer: MutableList<InlineNode>? = null
+        val changes = mutableListOf<OpenChange>()
         val children = container.childNodes
         for (index in 0 until children.length) {
             when (val node = children.item(index)) {
                 is org.w3c.dom.Text -> if (node.nodeValue.isNotEmpty()) {
                     val text = InlineNode.Text(node.nodeValue, style, SourceAnchor(context.part, "text()"))
-                    if (changeBuffer != null) changeBuffer += text else output += text
+                    appendChanged(changes, output, text)
                 }
                 is Element -> when {
-                    node.matchesNs(Ns.TEXT, "change-start") -> changeBuffer = mutableListOf()
+                    node.matchesNs(Ns.TEXT, "change-start") -> {
+                        changes += OpenChange(changeId(node), mutableListOf())
+                    }
                     node.matchesNs(Ns.TEXT, "change-end") -> {
-                        val buffered = changeBuffer
-                        changeBuffer = null
-                        output += InlineNode.Revision(
-                            kind = RevisionKind.INSERTION,
-                            children = buffered.orEmpty(),
-                            anchor = SourceAnchor(context.part, "text:change-end")
-                        )
+                        val id = changeId(node)
+                        val matchedIndex = changes.indexOfLast { id == null || it.id == id }
+                        if (matchedIndex < 0) {
+                            context.diagnostics.warning(
+                                "text:change-end", "change-end without matching change-start"
+                            )
+                        } else {
+                            while (changes.lastIndex > matchedIndex) {
+                                val unclosed = changes.removeAt(changes.lastIndex)
+                                context.diagnostics.warning(
+                                    "text:change-start", "change-start without matching change-end"
+                                )
+                                appendChanged(
+                                    changes,
+                                    output,
+                                    InlineNode.Revision(RevisionKind.INSERTION, children = unclosed.nodes)
+                                )
+                            }
+                            val matched = changes.removeAt(changes.lastIndex)
+                            if (matched.nodes.isNotEmpty()) {
+                                appendChanged(
+                                    changes,
+                                    output,
+                                    InlineNode.Revision(
+                                        kind = RevisionKind.INSERTION,
+                                        children = matched.nodes,
+                                        anchor = SourceAnchor(context.part, "text:change-end")
+                                    )
+                                )
+                            }
+                        }
                     }
                     else -> {
                         val parsed = parseElement(node, style)
-                        if (changeBuffer != null) changeBuffer?.addAll(parsed) else output += parsed
+                        parsed.forEach { appendChanged(changes, output, it) }
                     }
                 }
                 else -> if (node.nodeType == Node.CDATA_SECTION_NODE && !node.nodeValue.isNullOrEmpty()) {
                     val text = InlineNode.Text(node.nodeValue.orEmpty(), style, SourceAnchor(context.part, "text()"))
-                    if (changeBuffer != null) changeBuffer += text else output += text
+                    appendChanged(changes, output, text)
                 }
             }
         }
-        // Unmatched start: keep the partial content visible inside a revision.
-        changeBuffer?.let { buffered ->
-            if (buffered.isNotEmpty()) {
-                output += InlineNode.Revision(kind = RevisionKind.INSERTION, children = buffered)
+        while (changes.isNotEmpty()) {
+            val unclosed = changes.removeAt(changes.lastIndex)
+            if (unclosed.nodes.isNotEmpty()) {
+                context.diagnostics.warning(
+                    "text:change-start", "change-start without matching change-end"
+                )
+                appendChanged(
+                    changes,
+                    output,
+                    InlineNode.Revision(kind = RevisionKind.INSERTION, children = unclosed.nodes)
+                )
             }
         }
         return output
+    }
+
+    private data class OpenChange(val id: String?, val nodes: MutableList<InlineNode>)
+
+    private fun changeId(element: Element): String? =
+        element.attrNs(Ns.TEXT, "change-id") ?: element.attrNs(Ns.TEXT, "id")
+
+    private fun appendChanged(
+        changes: MutableList<OpenChange>,
+        output: MutableList<InlineNode>,
+        node: InlineNode
+    ) {
+        (changes.lastOrNull()?.nodes ?: output).add(node)
     }
 
     private fun parseElement(element: Element, style: TextStyle): List<InlineNode> {
@@ -153,6 +198,13 @@ class OdfInlineMapper(
                     )
                 )
             }
+            element.matchesNs(Ns.TEXT, "ruby") -> listOf(
+                InlineNode.Ruby(
+                    base = element.firstNs(Ns.TEXT, "ruby-base")?.let { parse(it, style) }.orEmpty(),
+                    rubyText = element.firstNs(Ns.TEXT, "ruby-text")?.let { parse(it, style) }.orEmpty(),
+                    anchor = anchor
+                )
+            )
             element.matchesNs(Ns.TEXT, "number") ->
                 listOf(InlineNode.Text(element.textContent.orEmpty(), style, anchor))
             element.matchesNs(Ns.TEXT, "note-citation") -> emptyList()

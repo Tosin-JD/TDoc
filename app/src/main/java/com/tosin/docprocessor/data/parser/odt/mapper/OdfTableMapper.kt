@@ -36,21 +36,30 @@ class OdfTableMapper(private val context: OdfMapContext) {
                 child.matchesNs(Ns.TABLE, "table-columns") ->
                     child.elementsNs(Ns.TABLE, "table-column").forEach { gridColumns += parseColumn(it) }
                 child.matchesNs(Ns.TABLE, "table-row") -> {
+                    val spanStart = spans.size
                     val parsed = parseRow(child, isHeader = false, rowIndex, spans)
-                    rows += expand(parsed, repeatOf(child), "table:table-row")
-                    rowIndex += parsed.cells.size * repeatOf(child)
+                    val repeat = repeatOf(child)
+                    repeatSpans(spans, spanStart, rowIndex, repeat)
+                    rows += expand(parsed, repeat, "table:table-row")
+                    rowIndex += repeat
                 }
                 child.matchesNs(Ns.TABLE, "table-header-rows") ->
                     child.elementsNs(Ns.TABLE, "table-row").forEach {
+                        val spanStart = spans.size
                         val parsed = parseRow(it, isHeader = true, rowIndex, spans)
-                        rows += expand(parsed, repeatOf(it), "table:table-header-rows")
-                        rowIndex += parsed.cells.size * repeatOf(it)
+                        val repeat = repeatOf(it)
+                        repeatSpans(spans, spanStart, rowIndex, repeat)
+                        rows += expand(parsed, repeat, "table:table-header-rows")
+                        rowIndex += repeat
                     }
                 child.matchesNs(Ns.TABLE, "table-row-group") ->
                     child.elementsNs(Ns.TABLE, "table-row").forEach {
+                        val spanStart = spans.size
                         val parsed = parseRow(it, isHeader = false, rowIndex, spans)
-                        rows += expand(parsed, repeatOf(it), "table:table-row-group")
-                        rowIndex += parsed.cells.size * repeatOf(it)
+                        val repeat = repeatOf(it)
+                        repeatSpans(spans, spanStart, rowIndex, repeat)
+                        rows += expand(parsed, repeat, "table:table-row-group")
+                        rowIndex += repeat
                     }
             }
         }
@@ -73,6 +82,13 @@ class OdfTableMapper(private val context: OdfMapContext) {
     }
 
     private data class CellSpan(val row: Int, val col: Int, val rowSpan: Int)
+
+    private fun repeatSpans(spans: MutableList<CellSpan>, start: Int, row: Int, repeat: Int) {
+        val rowSpans = spans.subList(start, spans.size).toList()
+        for (offset in 1 until repeat) {
+            rowSpans.forEach { span -> spans += span.copy(row = row + offset) }
+        }
+    }
 
     /**
      * Producers may omit `table:covered-table-cell` placeholders for cells
@@ -191,7 +207,13 @@ class OdfTableMapper(private val context: OdfMapContext) {
         val repeat = cell.attrNs(Ns.TABLE, "number-columns-repeated")?.toIntOrNull()?.coerceIn(1, 512) ?: 1
         val gridSpan = cell.attrNs(Ns.TABLE, "number-columns-spanned")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         val rowSpan = cell.attrNs(Ns.TABLE, "number-rows-spanned")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
-        val style = context.styles.cellStyle(cell.attrNs(Ns.TABLE, "style-name"))
+        val styleName = cell.attrNs(Ns.TABLE, "style-name")
+        val style = context.styles.cellStyle(styleName)
+        if (context.styles.hasRelativeCellWidth(styleName)) {
+            context.diagnostics.warning(
+                "table:table-cell", "Relative cell width is unsupported; width was left unspecified"
+            )
+        }
         val blocks = blockMapper.parseBlocks(cell)
         val anchor = SourceAnchor(context.part, "table:table-cell")
         val base = style.copy(

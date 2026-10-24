@@ -93,7 +93,12 @@ class DocxTableMapper(
                 }
                 "continue", "cont" -> {
                     if (anchorIndex >= 0) spanned++
-                    // Cells covered without a restart anchor are dropped too.
+                    else {
+                        context.diagnostics.warning(
+                            "w:hMerge", "continuation cell without a restart anchor treated as an ordinary cell"
+                        )
+                        output += entry.cell
+                    }
                 }
                 else -> {
                     flushHorizontalSpan(output, anchorIndex, spanned)

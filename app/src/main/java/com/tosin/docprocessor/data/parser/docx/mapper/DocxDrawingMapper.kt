@@ -28,7 +28,8 @@ class DocxDrawingMapper(
         val graphicFrame = drawing.descendantsNs(Ns.A, "graphic").firstOrNull()
 
         val chart = drawing.descendantsNs("http://schemas.openxmlformats.org/drawingml/2006/chart", "chart")
-            .isNotEmpty()
+            .firstOrNull()
+        val isChart = chart != null
         val diagram = drawing.descendantsNs("http://schemas.openxmlformats.org/drawingml/2006/diagram", "relIds")
             .isNotEmpty() || drawing.descendantsNs(
             "http://schemas.openxmlformats.org/drawingml/2006/diagram", "dataModelExt"
@@ -37,13 +38,24 @@ class DocxDrawingMapper(
         val blip = drawing.descendantsNs(Ns.A, "blip").firstOrNull()
         val pic = drawing.descendantsNs(Ns.PIC, "pic").isNotEmpty()
 
-        if (chart || diagram) {
+        if (isChart || diagram) {
             context.diagnostics.preserve("w:drawing", "[chart/smartart]")
+            val chartTitle = chart?.rAttr("id")
+                ?.let { context.relationships()[it]?.target }
+                ?.let(context.opc::document)
+                ?.documentElement
+                ?.descendantsNs("http://schemas.openxmlformats.org/drawingml/2006/chart", "title")
+                ?.firstOrNull()
+                ?.textContent?.trim()?.takeIf { it.isNotEmpty() }
             return InlineNode.Opaque(
                 capture(
                     drawing,
                     SourceAnchor(context.part, "w:drawing"),
-                    reason = if (chart) "chart not rendered" else "smartart not rendered"
+                    reason = when {
+                        isChart && chartTitle != null -> "chart not rendered; title: $chartTitle"
+                        isChart -> "chart not rendered"
+                        else -> "smartart not rendered"
+                    }
                 )
             )
         }
@@ -53,11 +65,7 @@ class DocxDrawingMapper(
             val txbxContent = drawing.descendantsNs(Ns.W, "txbxContent").firstOrNull()
             if (txbxContent != null && blockMapper != null) {
                 context.diagnostics.info("w:drawing", "Mapped shape with text box")
-                return InlineNode.TextBox(
-                    blocks = blockMapper.parseBlocks(txbxContent),
-                    frameStyle = drawingFrameStyle(anchorNode, extent),
-                    anchor = SourceAnchor(context.part, "w:txbxContent")
-                )
+                return textBox(txbxContent, drawingFrameStyle(anchorNode, extent), "w:txbxContent", blockMapper)
             }
             context.diagnostics.preserve("w:drawing", "[shape]")
             return InlineNode.Opaque(capture(drawing, SourceAnchor(context.part, "w:drawing"), "shape not rendered"))
@@ -98,10 +106,10 @@ class DocxDrawingMapper(
             // wp:extent/posOffset values are unprefixed attributes → no namespace.
             widthPoints = Units.emuToPoints(extent?.unprefixedLong("cx")),
             heightPoints = Units.emuToPoints(extent?.unprefixedLong("cy")),
-            positionXPoints = Units.emuToPoints(
+            positionXPoints = if (isInline) null else Units.emuToPoints(
                 positionH?.firstNs(Ns.WP, "posOffset")?.textContent?.trim()?.toLongOrNull()
             ),
-            positionYPoints = Units.emuToPoints(
+            positionYPoints = if (isInline) null else Units.emuToPoints(
                 positionV?.firstNs(Ns.WP, "posOffset")?.textContent?.trim()?.toLongOrNull()
             ),
             wrapStyle = wrapStyleOf(anchorNode),
@@ -129,17 +137,13 @@ class DocxDrawingMapper(
     }
 
     fun parseVmlPicture(pict: Element): InlineNode {
+        val shape = pict.descendantsNs(Ns.VML, "shape").firstOrNull()
         val textbox = pict.descendantsNs(Ns.VML, "textbox").firstOrNull()
         val txbxContent = textbox?.wFirst("txbxContent")
         if (txbxContent != null && blockMapper != null) {
             context.diagnostics.info("w:pict", "Mapped VML text box")
-            return InlineNode.TextBox(
-                blocks = blockMapper.parseBlocks(txbxContent),
-                frameStyle = FrameStyle(anchor = FrameAnchor.ANCHORED),
-                anchor = SourceAnchor(context.part, "v:textbox")
-            )
+            return textBox(txbxContent, vmlFrameStyle(shape, textbox), "v:textbox", blockMapper)
         }
-        val shape = pict.descendantsNs(Ns.VML, "shape").firstOrNull()
         val imagedata = pict.descendantsNs(Ns.VML, "imagedata").firstOrNull()
         val relId = imagedata?.rAttr("id") ?: imagedata?.rAttr("embed")
         val relationship = relId?.let { context.relationships()[it] }
@@ -156,5 +160,54 @@ class DocxDrawingMapper(
             title = shape?.getAttribute("title")?.takeIf { it.isNotBlank() },
             anchor = SourceAnchor(context.part, "w:pict")
         )
+    }
+
+    /**
+     * Maps `w:txbxContent` blocks into an [InlineNode.TextBox], capping nesting
+     * depth so hostile/broken documents can't overflow the stack (F7).
+     */
+    private fun textBox(
+        boxContent: Element,
+        frameStyle: FrameStyle,
+        construct: String,
+        mapper: DocxBlockMapper
+    ): InlineNode {
+        if (context.textBoxDepth >= TEXT_BOX_DEPTH_CAP) {
+            context.diagnostics.warning(construct, "text box nesting exceeds $TEXT_BOX_DEPTH_CAP; preserved opaque")
+            return InlineNode.Opaque(
+                capture(boxContent, SourceAnchor(context.part, construct), "text box nesting too deep")
+            )
+        }
+        context.textBoxDepth++
+        try {
+            return InlineNode.TextBox(
+                blocks = mapper.parseBlocks(boxContent),
+                frameStyle = frameStyle,
+                anchor = SourceAnchor(context.part, construct)
+            )
+        } finally {
+            context.textBoxDepth--
+        }
+    }
+
+    /** VML shape geometry comes from its `style` attribute (`width:…;height:…`). */
+    private fun vmlFrameStyle(shape: Element?, textbox: Element?): FrameStyle {
+        val styleText = shape?.getAttribute("style")?.takeIf { it.isNotBlank() }
+            ?: textbox?.getAttribute("style")?.takeIf { it.isNotBlank() }
+        return FrameStyle(
+            anchor = FrameAnchor.ANCHORED,
+            widthPoints = vmlLength(styleText, "width"),
+            heightPoints = vmlLength(styleText, "height")
+        )
+    }
+
+    private fun vmlLength(styleText: String?, key: String): Double? {
+        val entry = styleText?.split(';')?.map { it.trim() }?.firstOrNull { it.startsWith("$key:") } ?: return null
+        return Units.parseOdfLength(entry.removePrefix("$key:").trim())
+    }
+
+    private companion object {
+        /** Maximum nesting of text boxes inside text boxes (guards the recursion). */
+        const val TEXT_BOX_DEPTH_CAP = 8
     }
 }

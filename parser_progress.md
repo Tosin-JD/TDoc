@@ -23,16 +23,17 @@ Legend for tables: **DOCX** = `data/parser/docx/`, **ODT** = `data/parser/odt/`.
 
 ## Overall progress
 
-**Combined: 219 ✅ / 18 🟡 / 44 ❌ out of 281 applicable entries (~78 % complete).**
+**Wave completion:** F7–F28 are implemented; the aggregate inventory below is
+the pre-wave baseline and its numeric rollup has not been recounted.
 
 | Format | ✅ Done | 🟡 Partial | ❌ Remaining | Applicable total | Progress |
 |---|---|---|---|---|---|
 | DOCX | 119 | 7 | 19 | 145 | **82 %** (≈ 84 % counting partials) |
 | ODT | 100 | 11 | 25 | 136 | **74 %** (≈ 78 % counting partials) |
 
-Remaining work items are consolidated as **F7–F28** below (Wave 1, **F1–F6**,
-is complete — see `TODO2a.md`), then ordered by
-recommended precedence in *Recommended order of precedence*.
+F1–F6 are complete in `TODO2a.md`; F7–F15 are complete in `TODO2b.md`, and
+F16–F28 are complete in `TODO2c.md`. Items below are retained as a coverage
+reference; the individual stale gap notes are updated in the applicable rows.
 
 ---
 
@@ -44,7 +45,7 @@ recommended precedence in *Recommended order of precedence*.
 | Content-type / manifest recognition (`[Content_Types].xml`, `mimetype`, `META-INF/manifest.xml`) | ✅ | ✅ | |
 | Relationship resolution (OPC `.rels` ↔ ODF manifest + `xlink:href`) | ✅ | ✅ | External targets kept external (`DocxPackageTest`) |
 | Unrecognised package parts preserved as opaque parts (round-trip safe) | ✅ | ✅ | `OpaquePackagePart` + package inventory report |
-| Encrypted package detection with a clear error | 🟡 | ✅ | ODT explicitly rejects encrypted `content.xml`; DOCX only fails indirectly ("no main document part") |
+| Encrypted package detection with a clear error | ✅ | ✅ | DOCX encrypted parts/content types raise `ParseException`; ODT rejects encrypted `content.xml` |
 
 ## B. Body block elements
 
@@ -56,13 +57,13 @@ recommended precedence in *Recommended order of precedence*.
 | List block creation | ✅ | ✅ | DOCX: consecutive `numPr` paragraphs grouped into `ListBlock` |
 | Nested list hierarchy by level | ✅ | ✅ | DOCX: `ilvl` → nested `ListBlock` via `ListBlockGrouper` (TODO2a F3); ODT recurses by depth |
 | Block-level content control (`w:sdt`) | ✅ | — | Content unwrapped into blocks; empty `sdtContent` preserved |
-| Block-level tracked insert/delete (`w:ins`/`w:del`) | ✅ | ❌ | ODT `text:tracked-changes` → Opaque |
-| Block-level tracked move (`w:moveFrom`/`w:moveTo`) | ❌ | ❌ | Inline moves are parsed (DOCX); block-level falls to Opaque |
-| Section container (`text:section`) | — | ✅ | Mapped to `BlockNode.TextBox` |
-| Text box content (`w:txbxContent` / inline `draw:text-box`) | ❌ | 🟡 | DOCX: shapes with text are captured Opaque. ODT: **block** frames with `draw:text-box` ✅, **inline** frames with text → Opaque |
+| Block-level tracked insert/delete (`w:ins`/`w:del`) | ✅ | ✅ | Both formats map revisions and preserve attribution |
+| Block-level tracked move (`w:moveFrom`/`w:moveTo`) | ✅ | — | DOCX block moves map to revision blocks |
+| Section container (`text:section`) | — | ✅ | Content is flattened in flow with an associated master-page section break |
+| Text box content (`w:txbxContent` / inline `draw:text-box`) | ✅ | ✅ | DrawingML/VML and ODF inline frames recursively map their text |
 | Soft page break as block (`text:soft-page-break`) | — | ✅ | |
-| Index / TOC block (`text:table-of-content`, `alphabetical-index`, …) | ❌ | 🟡 | DOCX TOC only appears as a `Field`. ODT: `kind` parsed, `title`/`entries` empty |
-| `w:altChunk` captured as Opaque | 🟡 | — | Preserved, not merged |
+| Index / TOC block (`text:table-of-content`, `alphabetical-index`, …) | ✅ | ✅ | ODT title/entries parsed; cached DOCX field entries are extractable |
+| `w:altChunk` captured as Opaque | ✅ | — | Preserved with an explicit unsupported-merge diagnostic |
 | Unknown block → `Opaque` fallback with diagnostics | ✅ | ✅ | Never silently dropped |
 
 ## C. Inline elements
@@ -84,19 +85,19 @@ recommended precedence in *Recommended order of precedence*.
 | Complex field (`w:fldChar` begin/separate/end + `w:instrText`) | ✅ | — | Instruction + result nodes captured as `InlineNode.Field` |
 | Simple field (`w:fldSimple`) | ✅ | — | |
 | ODF text fields (`text:page-number`, `page-count`, `sheet-name`, `file-name`, `ref`, `sequence`, …) | — | ✅ | Mapped to `InlineNode.Field` with cached display text as `result` (TODO2a F5) |
-| Inline tracked insert/delete/move (`w:ins`/`w:del`/`w:moveFrom`/`w:moveTo`) | ✅ | ❌ | ODT `text:change`, `change-start/end` → Opaque |
-| Format-change revisions (`w:rPrChange`, `w:pPrChange`, ODF format changes) | ❌ | ❌ | `RevisionKind.FORMAT_CHANGE` exists but is never produced |
+| Inline tracked insert/delete/move (`w:ins`/`w:del`/`w:moveFrom`/`w:moveTo`) | ✅ | ✅ | ODF change ranges are matched by change id; unmatched boundaries diagnose |
+| Format-change revisions (`w:rPrChange`, `w:pPrChange`, ODF format changes) | ✅ | — | DOCX current formatting is wrapped; old snapshots are diagnosed as best-effort |
 | Inline content control (inline `w:sdt` with tag/alias/dataBinding) | ✅ | — | |
 | `w:smartTag` / `w:customXml` unwrapped, children parsed | ✅ | — | |
 | Proof errors (`w:proofErr`) correctly skipped | ✅ | — | |
-| Ruby (`w:ruby` base + rt) | ✅ | ❌ | ODT `text:ruby` children get concatenated by the fallback walk |
+| Ruby (`w:ruby` base + rt) | ✅ | ✅ | Both formats map base and annotation separately |
 | Inline image/drawing with extent, rotation, alt text, title | ✅ | ✅ | `InlineNode.Drawing` |
-| Frame position & wrap (x/y, wrap style, z-order) | 🟡 | 🟡 | Only size + inline/anchored flag + DOCX rotation; `positionX/Y`, `wrapStyle`, `zOrder` never set |
+| Frame position & wrap (x/y, wrap style, z-order) | ✅ | ✅ | Anchored position/wrap/z-order mapped; inline position remains unset |
 | Legacy VML picture (`w:pict` > `vml:shape` > `imagedata`) | ✅ | — | |
 | Shapes without image payload (VML shapes, `draw:shape`) | ❌ | ❌ | Preserved Opaque |
-| Charts (`c:chart` / `draw:chart`) | ❌ | ❌ | Preserved Opaque ("chart not rendered") |
-| SmartArt / diagrams (`a:diagram`) | ❌ | — | Preserved Opaque |
-| Embedded OLE objects (`w:object`, `draw:object`/`draw:ole`) | ❌ | ❌ | Preserved Opaque |
+| Charts (`c:chart` / `draw:chart`) | ✅ | ✅ | Preserved Opaque with cached title metadata; rendering remains out of scope |
+| SmartArt / diagrams (`a:diagram`) | ✅ | — | Preserved Opaque with an explicit diagram reason |
+| Embedded OLE objects (`w:object`, `draw:object`/`draw:ole`) | ✅ | ✅ | Preserved Opaque with ProgID/name metadata |
 | Numbered text (`text:number`) | — | ✅ | |
 | Note citation skipped in flow (`text:note-citation`) | — | ✅ | |
 | Unknown inline → Opaque / child walk fallback | ✅ | ✅ | |
@@ -105,20 +106,20 @@ recommended precedence in *Recommended order of precedence*.
 
 | Property | DOCX (`w:rPr`) | ODT (`style:text-properties`) | Notes |
 |---|---|---|---|
-| Font family (ascii/hAnsi/eastAsia/complex-script / `fo:font-family`) | 🟡 | ✅ | DOCX: names captured but **theme fonts** (`asciiTheme` → `theme1.xml`) are not resolved |
+| Font family (ascii/hAnsi/eastAsia/complex-script / `fo:font-family`) | ✅ | ✅ | DOCX theme font references resolve through `theme1.xml` |
 | Font size | ✅ | ✅ | |
 | Bold / italic | ✅ | ✅ | `onOff` tri-state; ODF weight/style values |
 | Underline kind + color | ✅ | 🟡 | ODF: style mapped, `text-underline-color` not read |
 | Strikethrough (single/double) | ✅ | ✅ | |
 | Superscript / subscript / baseline position | ✅ | ✅ | `w:vertAlign`, `fo:position`/`style:text-position` |
-| Color + theme color | 🟡 | ✅ | DOCX stores `themeColor` name only; no theme palette resolution |
+| Color + theme color | ✅ | ✅ | DOCX theme palette and tint/shade are resolved to concrete RGB |
 | Highlight | ✅ | ✅ | |
 | Run shading (`w:shd` / `fo:background-color`) | ✅ | ✅ | |
 | All-caps / small-caps | ✅ | 🟡 | ODF caps via `fo:text-transform`; no small-caps equivalent |
 | Letter spacing | ✅ | ✅ | |
 | Kerning | ✅ | — | |
 | Language | ✅ | ✅ | |
-| Right-to-left / writing direction | ✅ | ❌ | ODF `fo:direction` / `style:writing-mode` not read |
+| Right-to-left / writing direction | ✅ | ✅ | |
 | Hidden text (`w:vanish`/`webHidden`) | ✅ | ❌ | ODF visibility attributes not read |
 | Character style resolution (`w:rStyle` / `text:span` style-name) | ✅ | ✅ | Chains resolved, cached |
 
@@ -132,11 +133,11 @@ recommended precedence in *Recommended order of precedence*.
 | Spacing before/after | ✅ | ✅ | |
 | Line spacing + rule (auto 240ths / exact twips / %) | ✅ | ✅ | |
 | keep-with-next | ✅ | ✅ | |
-| keep-lines / keep-together | ✅ | ❌ | ODF `fo:keep-together` not read |
+| keep-lines / keep-together | ✅ | ✅ | |
 | Page-break-before | ✅ | ✅ | ODF `fo:break-before="page"` |
 | Widow/orphan control | ✅ | — | |
 | Outline level | ✅ | ✅ | |
-| Tab stops (`w:tabs`) | ✅ | ❌ | ODF `style:tab-strokes` not read |
+| Tab stops (`w:tabs`) | ✅ | ✅ | ODF position, type, and leader mapped |
 | Paragraph borders (`w:pBdr`) | ✅ | ✅ | ODF single `fo:border` → one border |
 | Paragraph shading | ✅ | ✅ | |
 | Paragraph-mark / default run props (`pPr/rPr`) | ✅ | ✅ | Feeds `defaultRunStyle` |
@@ -153,7 +154,7 @@ recommended precedence in *Recommended order of precedence*.
 | Ordered marker with `%1` substitution, roman/letter formats | ✅ | ✅ | Shared `ListMarkerFormatter` (decimal/zero/letter/roman/bullet); ODF prefix/suffix templates substituted (TODO2a F1) |
 | Sequential per-item renumbering (item 1, 2, 3…) | ✅ | ✅ | `ListNumberingState` per numId / list style; DOCX `startOverride` and ODF `start-value` honoured (TODO2a F2) |
 | Nested list structure preserved (DOCX `ilvl`) | ✅ | ✅ | See B |
-| ODF list `text:start` / `text:restart` / continue overrides | — | ❌ | |
+| ODF list `text:start` / `text:restart` / continue overrides | — | ✅ | Explicit start/restart resets per-list numbering state |
 | List-level indents carried into `ListStyle.levels` | ✅ | ✅ | |
 
 ## G. Tables
@@ -165,20 +166,20 @@ recommended precedence in *Recommended order of precedence*.
 | Header rows (`w:tblHeader` / `table:table-header-rows`) | ✅ | ✅ | |
 | Row height (`w:trHeight` / `style:row-height`) | ✅ | ✅ | ODT via `style:row-properties` (TODO2a F6) |
 | Column span (`w:gridSpan` / `number-columns-spanned`) | ✅ | ✅ | |
-| Row span / vertical merge (`w:vMerge` / covered cells + `number-rows-spanned`) | ✅ | 🟡 | ODT restart-only; no `CONTINUE` propagation across repeated rows |
-| Horizontal merge (`w:hMerge`) | ❌ | — | |
+| Row span / vertical merge (`w:vMerge` / covered cells + `number-rows-spanned`) | ✅ | ✅ | ODT inserts CONTINUE cells into omitted covered positions |
+| Horizontal merge (`w:hMerge`) | ✅ | — | |
 | Repeated columns (`number-columns-repeated`) | — | ✅ | |
 | Repeated rows (`number-rows-repeated`) | — | ✅ | Expanded with cap + diagnostic (TODO2a F6) |
-| Cell width (`w:tcW` / cell style width) | ✅ | ❌ | |
+| Cell width (`w:tcW` / cell style width) | ✅ | ✅ | Relative ODT widths remain unspecified with a diagnostic |
 | Table width, alignment, fixed/auto layout | ✅ | 🟡 | ODT: width + align, no layout concept (N/A) |
 | Table borders (per-side) | ✅ | ✅ | ODT: single `fo:border` applied to all sides |
 | Table shading | ✅ | ✅ | |
 | Cell borders (per-side) | ✅ | ✅ | |
-| Cell margins / padding (`w:tcMar`, `w:tblCellMar` / `fo:padding`) | ❌ | 🟡 | ODT: only detects that padding exists (currently reuses border values — suspicious); DOCX not read at all |
+| Cell margins / padding (`w:tcMar`, `w:tblCellMar` / `fo:padding`) | ✅ | ✅ | Separate from borders; per-cell overrides and table defaults retained |
 | Cell vertical align | ✅ | ✅ | |
-| Cell text direction | ✅ | ❌ | ODF direction attribute not read |
-| Table caption / description | ✅ | ❌ | DOCX `tblCaption`/`tblDescription`; ODT `table:name` etc. not read |
-| Table style resolved from styles (borders, banding `firstRow`/`bandRow`) | 🟡 | ✅ | DOCX `parseTableStyle` only reads `w:shd` |
+| Cell text direction | ✅ | ✅ | |
+| Table caption / description | ✅ | ✅ | ODT reads `table:caption`/`table:description` and `table:name` |
+| Table style resolved from styles (borders, banding `firstRow`/`bandRow`) | ✅ | ✅ | DOCX per-side borders, margins, and conditional banding flags |
 | Row properties (`w:cantSplit`, …) | ❌ | ❌ | Header flag is parsed; splitting not |
 
 ## H. Sections & page setup
@@ -189,17 +190,17 @@ recommended precedence in *Recommended order of precedence*.
 | Page size + orientation | ✅ | ✅ | |
 | Margins incl. header/footer/gutter | ✅ | ✅ | |
 | Columns: count + spacing | ✅ | ✅ | |
-| Columns: widths, `equalWidth`, `separate` | ❌ | ❌ | |
-| Page-number start (`w:pgNumType`) | ✅ | ❌ | |
+| Columns: widths, `equalWidth`, `separate` | ✅ | — | DOCX non-equal column widths parsed |
+| Page-number start (`w:pgNumType`) | ✅ | ✅ | ODF master-page page-number start parsed when declared |
 | Different first page (`w:titlePg` / `header-first`) | ✅ | ✅ | |
 | Even/odd headers (`w:evenAndOddHeaders` / `header-left`) | ✅ | ✅ | |
-| Section break type (`w:type` next/continuous) | ✅ | 🟡 | ODT type hardcoded to `nextPage` |
-| Master-page ↔ content binding (which section uses which master page) | — | ❌ | Sections are listed but not bound to content, so per-page geometry can't be assigned |
-| Page borders (`w:pgBorders`) | ❌ | ❌ | |
-| Line numbering (`w:lnNumType`) | ❌ | — | |
-| Footnote/endnote placement props in `sectPr` | ❌ | — | |
-| Section vertical alignment (`w:vAlign`) | ❌ | ❌ | |
-| Page background color/image | ❌ | ❌ | |
+| Section break type (`w:type` next/continuous) | ✅ | ✅ | ODF uses next-page master-page changes |
+| Master-page ↔ content binding (which section uses which master page) | — | ✅ | Paragraph and section style master-page bindings emit in-flow breaks |
+| Page borders (`w:pgBorders`) | ✅ | — | |
+| Line numbering (`w:lnNumType`) | ✅ | — | Step parsed |
+| Footnote/endnote placement props in `sectPr` | ✅ | — | |
+| Section vertical alignment (`w:vAlign`) | ✅ | — | |
+| Page background color/image | ✅ | ✅ | DOCX background relationship and ODF master-page image resources resolved |
 
 ## I. Headers & footers
 
@@ -208,7 +209,7 @@ recommended precedence in *Recommended order of precedence*.
 | Header/footer parts parsed as full block stories | ✅ | ✅ | Full `BlockNode` lists (paragraphs, tables, images) |
 | Variants: default / first / even | ✅ | ✅ | |
 | Dedup of shared header/footer references | ✅ | ✅ | |
-| Field evaluation inside stories (PAGE, NUMPAGES, STYLEREF, `text:page-number`) | 🟡 | 🟡 | Both formats capture `Field` nodes with cached display text (ODT via TODO2a F5); live evaluation is F19 |
+| Field evaluation inside stories (PAGE, NUMPAGES, STYLEREF, `text:page-number`) | ✅ | ✅ | Pure `FieldEvaluator` resolves render-context values and falls back to cached results |
 
 ## J. Notes & comments
 
@@ -229,7 +230,7 @@ recommended precedence in *Recommended order of precedence*.
 | Extended properties (app, company, template, word/page stats) | ✅ | ✅ | ODT via `meta:document-statistic` |
 | Custom / user-defined properties | ✅ | ✅ | |
 | Settings: protection, track-changes, even/odd headers, view/zoom | ✅ | ✅ | ODT via `config-item` map |
-| Default tab stop | ✅ | 🟡 | ODT `parseSettings` never reads `TabStop` config item |
+| Default tab stop | ✅ | ✅ | ODT `DefaultTabStop` configuration item parsed |
 
 ## L. Styles
 
@@ -241,7 +242,7 @@ recommended precedence in *Recommended order of precedence*.
 | List styles in catalogue | ✅ | ✅ |
 | Document defaults (`w:docDefaults` / `style:default-style`) | ✅ | ✅ |
 | Automatic styles (content.xml) override common styles | — | ✅ | `OdtStyleParserTest` |
-| Theme font resolution (`word/theme/theme1.xml`) | ❌ | — | Needed to render `asciiTheme` fonts correctly |
+| Theme font resolution (`word/theme/theme1.xml`) | ✅ | — | Theme fonts/colors resolve in run styles |
 
 ## M. Images & resources
 
@@ -251,8 +252,8 @@ recommended precedence in *Recommended order of precedence*.
 | External image targets flagged, not inlined | ✅ | ✅ | |
 | Intrinsic size carried (`wp:extent` / `svg:width`/`height`) | ✅ | ✅ | |
 | Alt text + title | ✅ | ✅ | `wp:docPr descr/title`, `svg:title`/`desc` |
-| Rotation | ✅ | ❌ | ODF `draw:transform` not parsed |
-| Figure caption extraction (`figcaption`, `text:caption`) | ❌ | ❌ | `Figure.caption` exists but is never populated |
+| Rotation | ✅ | ✅ | ODF `draw:transform` parsed |
+| Figure caption extraction (`figcaption`, `text:caption`) | — | ✅ | ODF frame captions and adjacent caption-style paragraphs attach to figures; DOCX remains inline |
 
 ## N. Diagnostics & preservation (infrastructure)
 
@@ -264,7 +265,11 @@ recommended precedence in *Recommended order of precedence*.
 
 ---
 
-## What remains (aggregated)
+## Resolved wave scope (F7–F28)
+
+The original gap descriptions below are retained as historical acceptance
+scope, not as open work. The parser implementations and regression coverage
+are tracked in `TODO2b.md` and `TODO2c.md`.
 
 **Structural fidelity:**
 

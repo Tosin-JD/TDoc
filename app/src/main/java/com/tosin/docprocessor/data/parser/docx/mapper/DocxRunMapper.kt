@@ -1,6 +1,7 @@
 package com.tosin.docprocessor.data.parser.docx.mapper
 
 import com.tosin.docprocessor.data.parser.common.Ns
+import com.tosin.docprocessor.data.parser.common.descendantsNs
 import com.tosin.docprocessor.data.parser.common.matchesNs
 import com.tosin.docprocessor.data.parser.common.w
 import com.tosin.docprocessor.data.parser.common.wAttr
@@ -95,9 +96,15 @@ class DocxRunMapper(private val context: DocxMapContext) {
                     child.matchesNs(Ns.W, "pict") -> nodes += DocxDrawingMapper(context, blockMapper).parseVmlPicture(child)
                     child.matchesNs(Ns.W, "object") -> {
                         context.diagnostics.preserve("w:object", "w:r")
+                        val ole = child.descendantsNs(Ns.O, "OLEObject").firstOrNull()
+                        val progId = ole?.getAttribute("ProgID")?.takeIf { it.isNotBlank() }
+                        val name = ole?.getAttribute("ShapeID")?.takeIf { it.isNotBlank() }
                         nodes += InlineNode.Opaque(
                             com.tosin.docprocessor.data.parser.common.OpaqueFragmentCapture.capture(
-                                child, anchor, "embedded object not rendered"
+                                child,
+                                anchor,
+                                listOfNotNull("embedded object not rendered", progId?.let { "ProgID=$it" }, name)
+                                    .joinToString("; ")
                             )
                         )
                     }
@@ -119,6 +126,10 @@ class DocxRunMapper(private val context: DocxMapContext) {
     private fun formatChangeWrap(run: Element, nodes: List<InlineNode>): List<InlineNode> {
         if (nodes.isEmpty()) return nodes
         val change = run.wFirst("rPr")?.wFirst("rPrChange") ?: return nodes
+        context.diagnostics.warning(
+            "w:rPrChange",
+            "Current run formatting retained; old run-property snapshot was not interpreted"
+        )
         return listOf(
             InlineNode.Revision(
                 kind = RevisionKind.FORMAT_CHANGE,

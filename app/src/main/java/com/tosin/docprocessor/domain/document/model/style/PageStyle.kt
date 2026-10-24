@@ -28,7 +28,9 @@ data class PageStyle(
     /** Footnote/endnote placement relative to the body (`topBottom`, `pageBottom`). */
     val notePlacement: String? = null,
     /** Page background color (hex or CSS name) when declared. */
-    val background: String? = null
+    val background: String? = null,
+    /** Logical resource id for a page background image. */
+    val backgroundImageResourceId: String? = null
 )
 
 enum class HeaderFooterVariant { DEFAULT, FIRST, EVEN }
@@ -39,5 +41,7 @@ data class SectionStyle(
     val page: PageStyle = PageStyle(),
     val pageNumberStart: Int? = null,
     val hasDifferentFirstPage: Boolean = false,
-    val hasDifferentEvenOdd: Boolean = false
+    val hasDifferentEvenOdd: Boolean = false,
+    /** ODF master-page name associated with this section. */
+    val masterPageName: String? = null
 )

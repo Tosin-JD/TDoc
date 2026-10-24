@@ -22,6 +22,7 @@ import org.w3c.dom.Element
 class OdfStyleResolver private constructor(
     private val textPool: Map<String, Element>,
     private val paragraphPool: Map<String, Element>,
+    private val sectionMasterPages: Map<String, String>,
     private val listPool: Map<String, Element>,
     private val tablePool: Map<String, Element>,
     private val cellPool: Map<String, Element>,
@@ -80,11 +81,18 @@ class OdfStyleResolver private constructor(
         }
     }
 
+    fun hasRelativeCellWidth(name: String?): Boolean {
+        val properties = name?.let(cellPool::get)?.firstNs(Ns.STYLE, "table-cell-properties")
+        return properties?.attrNs(Ns.STYLE, "width")?.contains('%') == true
+    }
+
     fun pageStyle(name: String?): PageStyle = name?.let(pageLayouts::get) ?: PageStyle()
 
     /** Resolves a `style:master-page` name to its page layout geometry. */
     fun pageStyleForMasterPage(name: String?): PageStyle? =
         name?.let(masterPageLayouts::get)?.let(pageLayouts::get)
+
+    fun masterPageForSectionStyle(name: String?): String? = name?.let(sectionMasterPages::get)
 
     /** Column width in points from `style:column-width` (null when optimal/relative). */
     fun columnWidth(name: String?): Double? = name?.let(columnPool::get)?.let {
@@ -127,6 +135,7 @@ class OdfStyleResolver private constructor(
 
             val textPool = linkedMapOf<String, Element>()
             val paragraphPool = linkedMapOf<String, Element>()
+            val sectionMasterPages = linkedMapOf<String, String>()
             val listPool = linkedMapOf<String, Element>()
             val tablePool = linkedMapOf<String, Element>()
             val cellPool = linkedMapOf<String, Element>()
@@ -146,7 +155,15 @@ class OdfStyleResolver private constructor(
 
             roots.forEach { root ->
                 containers(root).forEach { container ->
-                    collectStyles(container, "style", textPool, paragraphPool, tablePool, cellPool)
+                    collectStyles(
+                        container,
+                        "style",
+                        textPool,
+                        paragraphPool,
+                        sectionMasterPages,
+                        tablePool,
+                        cellPool
+                    )
                     collectMemberStyles(container, "table-column", columnPool)
                     collectMemberStyles(container, "table-row", rowPool)
                 collectListStyles(container, listPool)
@@ -167,7 +184,7 @@ class OdfStyleResolver private constructor(
                 }
             }
             return OdfStyleResolver(
-                textPool, paragraphPool, listPool, tablePool, cellPool,
+                textPool, paragraphPool, sectionMasterPages, listPool, tablePool, cellPool,
                 columnPool, rowPool, pageLayouts, masterPageLayouts, defaultParagraph, defaultText
             )
         }
@@ -177,6 +194,7 @@ class OdfStyleResolver private constructor(
             local: String,
             textPool: MutableMap<String, Element>,
             paragraphPool: MutableMap<String, Element>,
+            sectionMasterPages: MutableMap<String, String>,
             tablePool: MutableMap<String, Element>,
             cellPool: MutableMap<String, Element>
         ) {
@@ -185,6 +203,8 @@ class OdfStyleResolver private constructor(
                 when (style.attrNs(Ns.STYLE, "family")) {
                     "text" -> textPool[name] = style
                     "paragraph" -> paragraphPool[name] = style
+                    "section" -> style.attrNs(Ns.STYLE, "master-page-name")
+                        ?.let { sectionMasterPages[name] = it }
                     "table" -> tablePool[name] = style
                     "table-cell" -> cellPool[name] = style
                 }

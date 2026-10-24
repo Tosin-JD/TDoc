@@ -35,6 +35,8 @@ data class TextStyle(
     val verticalAlign: VerticalAlign? = null,
     val color: String? = null,
     val colorTheme: String? = null,
+    val colorThemeTint: String? = null,
+    val colorThemeShade: String? = null,
     val highlight: String? = null,
     val shading: Shading? = null,
     val caps: Boolean? = null,
@@ -44,6 +46,7 @@ data class TextStyle(
     val positionPoints: Double? = null,
     val language: String? = null,
     val rightToLeft: Boolean? = null,
+    val direction: String? = null,
     val hidden: Boolean? = null
 ) {
     /** Overlay [other] on top of this style (other wins where specified). */
@@ -61,6 +64,8 @@ data class TextStyle(
         verticalAlign = other.verticalAlign ?: verticalAlign,
         color = other.color ?: color,
         colorTheme = other.colorTheme ?: colorTheme,
+        colorThemeTint = other.colorThemeTint ?: colorThemeTint,
+        colorThemeShade = other.colorThemeShade ?: colorThemeShade,
         highlight = other.highlight ?: highlight,
         shading = other.shading ?: shading,
         caps = other.caps ?: caps,
@@ -70,6 +75,7 @@ data class TextStyle(
         positionPoints = other.positionPoints ?: positionPoints,
         language = other.language ?: language,
         rightToLeft = other.rightToLeft ?: rightToLeft,
+        direction = other.direction ?: direction,
         hidden = other.hidden ?: hidden
     )
 }
