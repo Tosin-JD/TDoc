@@ -3,10 +3,13 @@ package com.tosin.docprocessor.data.parser.docx
 import com.tosin.docprocessor.data.parser.DocumentParser
 import com.tosin.docprocessor.data.parser.common.DiagnosticsCollector
 import com.tosin.docprocessor.data.parser.common.LegacyElementAdapter
+import com.tosin.docprocessor.data.parser.common.ListBlockGrouper
 import com.tosin.docprocessor.data.parser.common.Ns
 import com.tosin.docprocessor.data.parser.common.PackageInventoryBuilder
 import com.tosin.docprocessor.data.parser.common.ResourceCollector
 import com.tosin.docprocessor.data.parser.common.firstNs
+import com.tosin.docprocessor.data.parser.common.wAttr
+import com.tosin.docprocessor.data.parser.common.wFirst
 import com.tosin.docprocessor.data.parser.docx.mapper.DocxBlockMapper
 import com.tosin.docprocessor.data.parser.docx.mapper.DocxMapContext
 import com.tosin.docprocessor.data.parser.docx.mapper.DocxMetadataMapper
@@ -14,15 +17,16 @@ import com.tosin.docprocessor.data.parser.docx.mapper.DocxSectionMapper
 import com.tosin.docprocessor.data.parser.docx.mapper.DocxTableMapper
 import com.tosin.docprocessor.data.parser.docx.opc.OpcPackage
 import com.tosin.docprocessor.data.parser.docx.resolve.DocxNumberingResolver
+import com.tosin.docprocessor.data.parser.docx.resolve.DocxSectionProperties
 import com.tosin.docprocessor.data.parser.docx.resolve.DocxStyleResolver
+import com.tosin.docprocessor.data.parser.docx.resolve.DocxThemeResolver
 import com.tosin.docprocessor.domain.document.ParseResult
 import com.tosin.docprocessor.domain.document.model.BlockNode
 import com.tosin.docprocessor.domain.document.model.NoteKind
 import com.tosin.docprocessor.domain.document.model.OpaquePackagePart
 import com.tosin.docprocessor.domain.document.model.ParsedDocument
+import com.tosin.docprocessor.domain.document.model.SourceAnchor
 import com.tosin.docprocessor.domain.document.model.SourceFormat
-import com.tosin.docprocessor.domain.document.model.style.ListKind
-import com.tosin.docprocessor.domain.document.model.style.ListStyle
 import com.tosin.docprocessor.domain.model.DocumentElement
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -61,6 +65,9 @@ class DocxDocumentParser(
     }
 
     fun parseEntries(entries: Map<String, ByteArray>): ParseResult {
+        if (entries.containsKey("EncryptedPackage") || entries.containsKey("EncryptionInfo")) {
+            throw IllegalArgumentException("Encrypted DOCX documents are not supported")
+        }
         val opc = OpcPackage.parse(entries, diagnostics)
         val mainPart = opc.mainDocumentPart()
             ?: throw IllegalArgumentException("Not a valid DOCX: no main document part found")
@@ -76,15 +83,39 @@ class DocxDocumentParser(
             (opc.partByRelationshipType(mainPart, "numbering") ?: "word/numbering.xml").let(opc::document)
         ).withStyleLinks(styleResolver.styleLinks())
 
+        val theme = DocxThemeResolver.parse(
+            (opc.partByRelationshipType(mainPart, "theme") ?: "word/theme/theme1.xml").let(opc::document)
+        )
+        val sectionMapper = DocxSectionMapper(opc, mainPart, styleResolver, numbering, resources, diagnostics)
+        val settings = sectionMapper.parseSettings(sectionMapper.settingsDocument())
+
         val partDiagnostics = DiagnosticsCollector(mainPart)
-        val context = DocxMapContext(mainPart, opc, styleResolver, numbering, resources, partDiagnostics)
+        val context = DocxMapContext(
+            mainPart, opc, styleResolver, numbering, resources, partDiagnostics,
+            theme = theme, evenAndOddHeaders = settings.evenAndOddHeaders
+        )
         val blockMapper = DocxBlockMapper(context).also { it.attach(DocxTableMapper(context, it)) }
 
-        val blocks = groupLists(blockMapper.parseBlocks(body))
+        val bodyBlocks = blockMapper.parseBlocks(body)
+        val grouped = ListBlockGrouper.group(bodyBlocks) { numId ->
+            numbering.asListStyle(styleId = null, numId = numId)
+        }
+        // The document-level sectPr closes the final section in flow.
+        val blocks = body.wFirst("sectPr")?.let { sectPr ->
+            grouped + BlockNode.SectionBreak(
+                style = DocxSectionProperties.parse(
+                    sectPr, blockMapper.sectionBreakCount + 1, settings.evenAndOddHeaders
+                ),
+                anchor = SourceAnchor(mainPart, "w:sectPr")
+            )
+        } ?: grouped
 
-        val sectionMapper = DocxSectionMapper(opc, mainPart, styleResolver, numbering, resources, partDiagnostics)
-        val settings = sectionMapper.parseSettings(sectionMapper.settingsDocument())
-        val sections = sectionMapper.collectSections(body, settings)
+        val sections = sectionMapper.collectSections(body, settings).map { section ->
+            document.documentElement?.wFirst("background")?.wAttr("fill")
+                ?.takeIf { it.isNotBlank() }
+                ?.let { section.copy(page = section.page.copy(background = it)) }
+                ?: section
+        }
         val headerFooters = sectionMapper.parseHeaderFooters(body, settings)
         val comments = sectionMapper.parseComments(opc.document("word/comments.xml"))
         val notes = sectionMapper.parseNotes(
@@ -123,40 +154,6 @@ class DocxDocumentParser(
         )
     }
 
-    private fun groupLists(blocks: List<BlockNode>): List<BlockNode> {
-        val output = mutableListOf<BlockNode>()
-        var index = 0
-        while (index < blocks.size) {
-            val block = blocks[index]
-            val marker = (block as? BlockNode.Paragraph)?.listMarker
-            if (marker == null) {
-                output += block
-                index++
-                continue
-            }
-            val items = mutableListOf<BlockNode.ListItem>()
-            while (index < blocks.size) {
-                val current = blocks[index] as? BlockNode.Paragraph ?: break
-                val currentMarker = current.listMarker ?: break
-                if (currentMarker.ordered != marker.ordered) break
-                items += BlockNode.ListItem(
-                    blocks = listOf(current),
-                    marker = currentMarker,
-                    anchor = current.anchor
-                )
-                index++
-            }
-            val kind = if (marker.ordered) ListKind.ORDERED else ListKind.UNORDERED
-            output += BlockNode.ListBlock(
-                kind = kind,
-                style = ListStyle(kind = kind),
-                items = items,
-                anchor = items.firstOrNull()?.anchor
-            )
-        }
-        return output
-    }
-
     private fun recognizedPaths(opc: OpcPackage): Set<String> = entries.keys.filter { path ->
         path == "[Content_Types].xml" || path.endsWith(".rels") || opc.contentTypes.contentTypeFor(path) != null
     }.toSet()
@@ -164,7 +161,12 @@ class DocxDocumentParser(
     private fun preservedParts(opc: OpcPackage): List<OpaquePackagePart> = entries
         .filterKeys { opc.contentTypes.contentTypeFor(it) == null && it != "[Content_Types].xml" && !it.endsWith(".rels") }
         .map { (path, bytes) ->
-            OpaquePackagePart(path = path, mimeType = null, bytes = bytes, role = "unrecognised")
+            OpaquePackagePart(
+                path = path,
+                mimeType = null,
+                bytes = bytes,
+                role = if (path.startsWith("word/glossary/")) "glossary" else "unrecognised"
+            )
         }
 
     companion object {

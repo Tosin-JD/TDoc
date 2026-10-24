@@ -15,7 +15,9 @@ enum class IndexKind {
 data class ListMarker(
     val text: String?,
     val level: Int,
-    val ordered: Boolean
+    val ordered: Boolean,
+    /** Numbering identity (DOCX `w:numId`, ODF list style name); null when unknown. */
+    val numId: String? = null
 )
 
 /** Block-level content. Order is significant and preserved. */
@@ -80,6 +82,7 @@ sealed interface BlockNode {
 
     data class TextBox(
         val blocks: List<BlockNode>,
+        val frameStyle: FrameStyle = FrameStyle(),
         override val anchor: SourceAnchor? = null
     ) : BlockNode
 

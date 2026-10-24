@@ -9,6 +9,7 @@ import com.tosin.docprocessor.data.parser.docx.resolve.DocxRunProperties
 import com.tosin.docprocessor.domain.document.model.BreakKind
 import com.tosin.docprocessor.domain.document.model.InlineNode
 import com.tosin.docprocessor.domain.document.model.NoteKind
+import com.tosin.docprocessor.domain.document.model.RevisionKind
 import com.tosin.docprocessor.domain.document.model.SourceAnchor
 import com.tosin.docprocessor.domain.document.model.style.TextStyle
 import org.w3c.dom.Element
@@ -23,11 +24,20 @@ data class RunChildren(
 /** Maps `w:r` (and its `rPr`) into ordered inline nodes. */
 class DocxRunMapper(private val context: DocxMapContext) {
 
+    private var blockMapper: DocxBlockMapper? = null
+
+    /** Threaded from [DocxBlockMapper] so shapes with text payload can recurse into blocks. */
+    fun attach(blockMapper: DocxBlockMapper) {
+        this.blockMapper = blockMapper
+    }
+
     fun runStyle(run: Element, baseStyle: TextStyle): TextStyle {
         val rPr = run.wFirst("rPr")
         var style = baseStyle
         rPr?.wFirst("rStyle")?.wAttr("val")?.let { style = style.mergedWith(context.styles.characterStyle(it)) }
         style = style.mergedWith(DocxRunProperties.parse(rPr))
+        // Theme font names and theme colors become concrete values here.
+        style = context.theme.resolve(style)
         return style
     }
 
@@ -81,8 +91,8 @@ class DocxRunMapper(private val context: DocxMapContext) {
                         child.wAttr("id").orEmpty(),
                         anchor
                     )
-                    child.matchesNs(Ns.W, "drawing") -> nodes += DocxDrawingMapper(context).parseDrawing(child)
-                    child.matchesNs(Ns.W, "pict") -> nodes += DocxDrawingMapper(context).parseVmlPicture(child)
+                    child.matchesNs(Ns.W, "drawing") -> nodes += DocxDrawingMapper(context, blockMapper).parseDrawing(child)
+                    child.matchesNs(Ns.W, "pict") -> nodes += DocxDrawingMapper(context, blockMapper).parseVmlPicture(child)
                     child.matchesNs(Ns.W, "object") -> {
                         context.diagnostics.preserve("w:object", "w:r")
                         nodes += InlineNode.Opaque(
@@ -97,7 +107,27 @@ class DocxRunMapper(private val context: DocxMapContext) {
             }
         }
 
-        return RunChildren(nodes = nodes, instructionText = instruction.toString(), fieldChar = fieldChar)
+        return RunChildren(
+            nodes = formatChangeWrap(run, nodes),
+            instructionText = instruction.toString(),
+            fieldChar = fieldChar
+        )
+    }
+
+    /** `w:rPrChange` marks a run-format revision; keep the run's current
+     *  formatting visible inside a FORMAT_CHANGE revision node. */
+    private fun formatChangeWrap(run: Element, nodes: List<InlineNode>): List<InlineNode> {
+        if (nodes.isEmpty()) return nodes
+        val change = run.wFirst("rPr")?.wFirst("rPrChange") ?: return nodes
+        return listOf(
+            InlineNode.Revision(
+                kind = RevisionKind.FORMAT_CHANGE,
+                author = change.wAttr("author"),
+                date = change.wAttr("date"),
+                children = nodes,
+                anchor = SourceAnchor(context.part, "w:rPrChange")
+            )
+        )
     }
 
     private fun parseRuby(ruby: Element, style: TextStyle): InlineNode {

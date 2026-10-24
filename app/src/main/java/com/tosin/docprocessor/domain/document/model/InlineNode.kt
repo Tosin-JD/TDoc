@@ -104,6 +104,14 @@ sealed interface InlineNode {
         override val anchor: SourceAnchor? = null
     ) : InlineNode
 
+    /** Inline-positioned text frame (ODF inline `draw:text-box`, DOCX shape text). */
+    data class TextBox(
+        val blocks: List<BlockNode>,
+        val frameStyle: com.tosin.docprocessor.domain.document.model.style.FrameStyle =
+            com.tosin.docprocessor.domain.document.model.style.FrameStyle(),
+        override val anchor: SourceAnchor? = null
+    ) : InlineNode
+
     data class Drawing(
         val frameStyle: com.tosin.docprocessor.domain.document.model.style.FrameStyle =
             com.tosin.docprocessor.domain.document.model.style.FrameStyle(),

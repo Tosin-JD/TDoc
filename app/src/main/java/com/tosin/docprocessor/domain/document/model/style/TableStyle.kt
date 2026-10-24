@@ -2,6 +2,16 @@ package com.tosin.docprocessor.domain.document.model.style
 
 enum class VerticalCellAlign { TOP, CENTER, BOTTOM }
 
+/** Conditional-formatting banding flags resolved from a DOCX table style. */
+data class TableBandFlags(
+    val firstRow: Boolean = false,
+    val lastRow: Boolean = false,
+    val firstColumn: Boolean = false,
+    val lastColumn: Boolean = false,
+    val band1: Boolean = false,
+    val band2: Boolean = false
+)
+
 data class CellBorders(
     val top: Border? = null,
     val right: Border? = null,
@@ -19,7 +29,8 @@ data class TableStyle(
     val cellMargins: CellBorders? = null,
     val layout: String? = null,
     val caption: String? = null,
-    val description: String? = null
+    val description: String? = null,
+    val banding: TableBandFlags = TableBandFlags()
 )
 
 data class CellStyle(

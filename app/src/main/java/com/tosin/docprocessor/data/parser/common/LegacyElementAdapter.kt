@@ -271,6 +271,9 @@ class LegacyElementAdapter {
                     is InlineNode.NoteReference -> Unit
                     is InlineNode.CommentBoundary, is InlineNode.CommentReference -> Unit
                     is InlineNode.Drawing -> drawings += drawingElement(inline)
+                    is InlineNode.TextBox -> plainText(inline.blocks).takeIf { it.isNotEmpty() }?.let { boxText ->
+                        spans += TextSpan(text = boxText, color = textStyle.color ?: "000000")
+                    }
                     is InlineNode.Opaque -> drawings += unsupported(inline.node)
                 }
             }

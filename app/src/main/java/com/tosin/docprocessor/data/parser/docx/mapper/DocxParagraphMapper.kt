@@ -20,6 +20,11 @@ class DocxParagraphMapper(private val context: DocxMapContext) {
 
     private val runMapper = DocxRunMapper(context)
 
+    /** Threaded from [DocxBlockMapper] so runs can map shapes with text payload. */
+    fun attach(blockMapper: DocxBlockMapper) {
+        runMapper.attach(blockMapper)
+    }
+
     fun parseParagraph(paragraph: Element): BlockNode {
         val pPr = paragraph.wFirst("pPr")
         val direct = DocxParagraphProperties.parse(pPr)
@@ -38,11 +43,27 @@ class DocxParagraphMapper(private val context: DocxMapContext) {
         }
 
         val listMarker = parseListMarker(pPr)
+        val revisionWrapped = formatChangeWrap(pPr, inlines)
         return BlockNode.Paragraph(
-            inlines = inlines,
+            inlines = revisionWrapped,
             style = resolvedStyle,
             listMarker = listMarker,
             anchor = SourceAnchor(context.part, "w:p")
+        )
+    }
+
+    /** `w:pPrChange` marks a paragraph-format revision; keep the current
+     *  formatting visible inside a FORMAT_CHANGE revision node. */
+    private fun formatChangeWrap(pPr: Element?, inlines: List<InlineNode>): List<InlineNode> {
+        val change = pPr?.wFirst("pPrChange") ?: return inlines
+        return listOf(
+            InlineNode.Revision(
+                kind = RevisionKind.FORMAT_CHANGE,
+                author = change.wAttr("author"),
+                date = change.wAttr("date"),
+                children = inlines,
+                anchor = SourceAnchor(context.part, "w:pPrChange")
+            )
         )
     }
 
@@ -189,10 +210,12 @@ class DocxParagraphMapper(private val context: DocxMapContext) {
         val numId = numPr.wFirst("numId")?.wAttr("val") ?: return null
         val ilvl = numPr.wFirst("ilvl")?.wAttr("val")?.toIntOrNull() ?: 0
         val ordered = context.numbering.isOrdered(numId, ilvl)
+        val sequence = context.listNumbering.nextItem(numId, ilvl)
         return ListMarker(
-            text = context.numbering.marker(numId, ilvl, 1),
+            text = context.numbering.marker(numId, ilvl, sequence),
             level = ilvl,
-            ordered = ordered
+            ordered = ordered,
+            numId = numId
         )
     }
 

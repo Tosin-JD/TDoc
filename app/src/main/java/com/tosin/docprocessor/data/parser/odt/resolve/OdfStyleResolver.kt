@@ -3,8 +3,10 @@ package com.tosin.docprocessor.data.parser.odt.resolve
 import com.tosin.docprocessor.data.parser.common.Ns
 import com.tosin.docprocessor.data.parser.common.attrNs
 import com.tosin.docprocessor.data.parser.common.elementsNs
+import com.tosin.docprocessor.data.parser.common.descendantsNs
 import com.tosin.docprocessor.data.parser.common.firstNs
 import com.tosin.docprocessor.domain.document.model.StyleCatalogue
+import com.tosin.docprocessor.domain.document.model.Units
 import com.tosin.docprocessor.domain.document.model.style.CellStyle
 import com.tosin.docprocessor.domain.document.model.style.ListStyle
 import com.tosin.docprocessor.domain.document.model.style.PageStyle
@@ -23,7 +25,10 @@ class OdfStyleResolver private constructor(
     private val listPool: Map<String, Element>,
     private val tablePool: Map<String, Element>,
     private val cellPool: Map<String, Element>,
+    private val columnPool: Map<String, Element>,
+    private val rowPool: Map<String, Element>,
     private val pageLayouts: Map<String, PageStyle>,
+    private val masterPageLayouts: Map<String, String>,
     private val defaultParagraphStyle: ParagraphStyle,
     private val defaultTextStyle: TextStyle
 ) {
@@ -77,6 +82,22 @@ class OdfStyleResolver private constructor(
 
     fun pageStyle(name: String?): PageStyle = name?.let(pageLayouts::get) ?: PageStyle()
 
+    /** Resolves a `style:master-page` name to its page layout geometry. */
+    fun pageStyleForMasterPage(name: String?): PageStyle? =
+        name?.let(masterPageLayouts::get)?.let(pageLayouts::get)
+
+    /** Column width in points from `style:column-width` (null when optimal/relative). */
+    fun columnWidth(name: String?): Double? = name?.let(columnPool::get)?.let {
+        OdfTableProperties.parseColumnWidth(it)
+    }
+
+    /** Row height in points from `style:row-height` (minimum height; null when optimal). */
+    fun rowHeight(name: String?): Double? {
+        val element = name?.let(rowPool::get) ?: return null
+        val props = element.firstNs(Ns.STYLE, "row-properties") ?: return null
+        return Units.parseOdfLength(props.attrNs(Ns.STYLE, "row-height"))
+    }
+
     fun catalogue(): StyleCatalogue = StyleCatalogue(
         paragraphStyles = paragraphPool.keys.associateWith { paragraphStyle(it) },
         textStyles = textPool.keys.associateWith { textStyle(it) },
@@ -109,23 +130,45 @@ class OdfStyleResolver private constructor(
             val listPool = linkedMapOf<String, Element>()
             val tablePool = linkedMapOf<String, Element>()
             val cellPool = linkedMapOf<String, Element>()
+            val columnPool = linkedMapOf<String, Element>()
+            val rowPool = linkedMapOf<String, Element>()
             val pageLayouts = linkedMapOf<String, PageStyle>()
+            val masterPageLayouts = linkedMapOf<String, String>()
             var defaultParagraph = ParagraphStyle()
             var defaultText = TextStyle()
 
+            // Styles may sit directly under the root or under the
+            // office:styles / office:automatic-styles wrapper elements.
+            fun containers(root: Element): List<Element> =
+                listOf(root) + root.elementsNs(Ns.OFFICE, "styles") +
+                    root.elementsNs(Ns.OFFICE, "automatic-styles") +
+                    root.elementsNs(Ns.OFFICE, "master-styles")
+
             roots.forEach { root ->
-                collectStyles(root, "style", textPool, paragraphPool, tablePool, cellPool)
-                collectListStyles(root, listPool)
-                collectPageLayouts(root, pageLayouts)
-                root.elementsNs(Ns.STYLE, "default-style").forEach { style ->
-                    when (style.attrNs(Ns.STYLE, "family")) {
-                        "paragraph" -> defaultParagraph = OdfParagraphProperties.parse(style)
-                        "text" -> defaultText = OdfTextProperties.parse(style)
+                containers(root).forEach { container ->
+                    collectStyles(container, "style", textPool, paragraphPool, tablePool, cellPool)
+                    collectMemberStyles(container, "table-column", columnPool)
+                    collectMemberStyles(container, "table-row", rowPool)
+                collectListStyles(container, listPool)
+                collectPageLayouts(container, pageLayouts)
+                container.descendantsNs(Ns.STYLE, "master-page").forEach { master ->
+                    master.attrNs(Ns.STYLE, "name")?.let { name ->
+                        master.attrNs(Ns.STYLE, "page-layout-name")?.let { layout ->
+                            masterPageLayouts[name] = layout
+                        }
+                    }
+                }
+                    container.elementsNs(Ns.STYLE, "default-style").forEach { style ->
+                        when (style.attrNs(Ns.STYLE, "family")) {
+                            "paragraph" -> defaultParagraph = OdfParagraphProperties.parse(style)
+                            "text" -> defaultText = OdfTextProperties.parse(style)
+                        }
                     }
                 }
             }
             return OdfStyleResolver(
-                textPool, paragraphPool, listPool, tablePool, cellPool, pageLayouts, defaultParagraph, defaultText
+                textPool, paragraphPool, listPool, tablePool, cellPool,
+                columnPool, rowPool, pageLayouts, masterPageLayouts, defaultParagraph, defaultText
             )
         }
 
@@ -145,6 +188,13 @@ class OdfStyleResolver private constructor(
                     "table" -> tablePool[name] = style
                     "table-cell" -> cellPool[name] = style
                 }
+            }
+        }
+
+        private fun collectMemberStyles(root: Element, family: String, pool: MutableMap<String, Element>) {
+            root.elementsNs(Ns.STYLE, "style").forEach { style ->
+                if (style.attrNs(Ns.STYLE, "family") != family) return@forEach
+                style.attrNs(Ns.STYLE, "name")?.let { pool[it] = style }
             }
         }
 

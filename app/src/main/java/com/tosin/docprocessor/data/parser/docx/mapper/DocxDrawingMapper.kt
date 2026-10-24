@@ -7,6 +7,7 @@ import com.tosin.docprocessor.data.parser.common.descendantsNs
 import com.tosin.docprocessor.data.parser.common.firstNs
 import com.tosin.docprocessor.data.parser.common.matchesNs
 import com.tosin.docprocessor.data.parser.common.rAttr
+import com.tosin.docprocessor.data.parser.common.wFirst
 import com.tosin.docprocessor.domain.document.model.InlineNode
 import com.tosin.docprocessor.domain.document.model.SourceAnchor
 import com.tosin.docprocessor.domain.document.model.Units
@@ -15,7 +16,10 @@ import com.tosin.docprocessor.domain.document.model.style.FrameStyle
 import org.w3c.dom.Element
 
 /** Maps DrawingML (`w:drawing`) and legacy VML (`w:pict`) into domain nodes. */
-class DocxDrawingMapper(private val context: DocxMapContext) {
+class DocxDrawingMapper(
+    private val context: DocxMapContext,
+    private val blockMapper: DocxBlockMapper? = null
+) {
 
     fun parseDrawing(drawing: Element): InlineNode {
         val anchorNode = drawing.firstNs(Ns.WP, "inline") ?: drawing.firstNs(Ns.WP, "anchor")
@@ -45,6 +49,16 @@ class DocxDrawingMapper(private val context: DocxMapContext) {
         }
 
         if (blip == null || (!pic && graphicFrame == null)) {
+            // Shapes may carry a text payload (`wps:txbx` > `w:txbxContent`).
+            val txbxContent = drawing.descendantsNs(Ns.W, "txbxContent").firstOrNull()
+            if (txbxContent != null && blockMapper != null) {
+                context.diagnostics.info("w:drawing", "Mapped shape with text box")
+                return InlineNode.TextBox(
+                    blocks = blockMapper.parseBlocks(txbxContent),
+                    frameStyle = drawingFrameStyle(anchorNode, extent),
+                    anchor = SourceAnchor(context.part, "w:txbxContent")
+                )
+            }
             context.diagnostics.preserve("w:drawing", "[shape]")
             return InlineNode.Opaque(capture(drawing, SourceAnchor(context.part, "w:drawing"), "shape not rendered"))
         }
@@ -64,14 +78,8 @@ class DocxDrawingMapper(private val context: DocxMapContext) {
         context.diagnostics.info("w:drawing", "Mapped drawing/image")
 
         return InlineNode.Drawing(
-            frameStyle = FrameStyle(
-                anchor = if (anchorNode != null && anchorNode.matchesNs(Ns.WP, "anchor").not()) {
-                    FrameAnchor.INLINE
-                } else FrameAnchor.ANCHORED,
-                widthPoints = Units.emuToPoints(extent?.attrNs(Ns.WP, "cx")?.toLongOrNull()),
-                heightPoints = Units.emuToPoints(extent?.attrNs(Ns.WP, "cy")?.toLongOrNull()),
-                rotationDegrees = rotationRaw?.let { it / 60_000.0 }
-            ),
+            frameStyle = drawingFrameStyle(anchorNode, extent)
+                .copy(rotationDegrees = rotationRaw?.let { it / 60_000.0 }),
             resourceId = resourceId,
             altText = docPr?.getAttribute("descr")?.takeIf { it.isNotBlank() }
                 ?: docPr?.getAttribute("title")?.takeIf { it.isNotBlank() },
@@ -80,7 +88,57 @@ class DocxDrawingMapper(private val context: DocxMapContext) {
         )
     }
 
+    /** Extent, anchor kind, absolute position, wrap style and z-order of a drawing. */
+    private fun drawingFrameStyle(anchorNode: Element?, extent: Element?): FrameStyle {
+        val isInline = anchorNode != null && anchorNode.matchesNs(Ns.WP, "inline")
+        val positionH = anchorNode?.firstNs(Ns.WP, "positionH")
+        val positionV = anchorNode?.firstNs(Ns.WP, "positionV")
+        return FrameStyle(
+            anchor = if (isInline) FrameAnchor.INLINE else FrameAnchor.ANCHORED,
+            // wp:extent/posOffset values are unprefixed attributes → no namespace.
+            widthPoints = Units.emuToPoints(extent?.unprefixedLong("cx")),
+            heightPoints = Units.emuToPoints(extent?.unprefixedLong("cy")),
+            positionXPoints = Units.emuToPoints(
+                positionH?.firstNs(Ns.WP, "posOffset")?.textContent?.trim()?.toLongOrNull()
+            ),
+            positionYPoints = Units.emuToPoints(
+                positionV?.firstNs(Ns.WP, "posOffset")?.textContent?.trim()?.toLongOrNull()
+            ),
+            wrapStyle = wrapStyleOf(anchorNode),
+            zOrder = anchorNode?.unprefixedLong("relativeHeight")?.toInt()
+        )
+    }
+
+    private fun Element.unprefixedLong(local: String): Long? =
+        getAttribute(local).takeIf { it.isNotEmpty() }?.toLongOrNull()
+
+    private fun wrapStyleOf(anchorNode: Element?): String? {
+        val children = anchorNode?.childNodes ?: return null
+        for (index in 0 until children.length) {
+            val child = children.item(index) as? Element ?: continue
+            val local = child.localName ?: continue
+            when (local) {
+                "wrapNone" -> return "none"
+                "wrapSquare" -> return "square"
+                "wrapTight" -> return "tight"
+                "wrapThrough" -> return "through"
+                "wrapTopAndBottom" -> return "topAndBottom"
+            }
+        }
+        return null
+    }
+
     fun parseVmlPicture(pict: Element): InlineNode {
+        val textbox = pict.descendantsNs(Ns.VML, "textbox").firstOrNull()
+        val txbxContent = textbox?.wFirst("txbxContent")
+        if (txbxContent != null && blockMapper != null) {
+            context.diagnostics.info("w:pict", "Mapped VML text box")
+            return InlineNode.TextBox(
+                blocks = blockMapper.parseBlocks(txbxContent),
+                frameStyle = FrameStyle(anchor = FrameAnchor.ANCHORED),
+                anchor = SourceAnchor(context.part, "v:textbox")
+            )
+        }
         val shape = pict.descendantsNs(Ns.VML, "shape").firstOrNull()
         val imagedata = pict.descendantsNs(Ns.VML, "imagedata").firstOrNull()
         val relId = imagedata?.rAttr("id") ?: imagedata?.rAttr("embed")

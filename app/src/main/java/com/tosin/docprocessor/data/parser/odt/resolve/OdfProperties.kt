@@ -168,6 +168,7 @@ object OdfTableProperties {
             CellBorders(top = border, right = border, bottom = border, left = border)
         } ?: CellBorders()
         return CellStyle(
+            widthPoints = Units.parseOdfLength(props?.attrNs(Ns.STYLE, "width")),
             verticalAlign = when (props?.attrNs(Ns.STYLE, "vertical-align")?.lowercase()) {
                 "top" -> VerticalCellAlign.TOP
                 "middle", "center" -> VerticalCellAlign.CENTER
@@ -176,8 +177,28 @@ object OdfTableProperties {
             },
             shading = props?.attrNs(Ns.FO, "background-color")?.let { Shading(fill = it) },
             borders = borders,
-            margins = borders.takeIf { props?.attrNs(Ns.FO, "padding") != null }
+            margins = parsePadding(props),
+            textDirection = props?.attrNs(Ns.FO, "text-direction")
+                ?: props?.attrNs(Ns.STYLE, "writing-mode")
         )
+    }
+
+    /** Cell padding from `fo:padding*` — never shares values with borders. */
+    private fun parsePadding(props: Element?): CellBorders? {
+        if (props == null) return null
+        fun side(override: String?, fallback: String?): Border? =
+            Units.parseOdfLength(override ?: fallback)?.let { Border(style = "padding", widthPoints = it) }
+
+        val uniform = props.attrNs(Ns.FO, "padding")
+        val margins = CellBorders(
+            top = side(props.attrNs(Ns.FO, "padding-top"), uniform),
+            right = side(props.attrNs(Ns.FO, "padding-right"), uniform),
+            bottom = side(props.attrNs(Ns.FO, "padding-bottom"), uniform),
+            left = side(props.attrNs(Ns.FO, "padding-left"), uniform)
+        )
+        return margins.takeIf {
+            it.top != null || it.right != null || it.bottom != null || it.left != null
+        }
     }
 
     fun parseColumnWidth(styleElement: Element?): Double? {
@@ -236,12 +257,17 @@ object OdfListProperties {
             val index = level.attrNs(Ns.TEXT, "level")?.toIntOrNull() ?: return@forEach
             val format = level.attrNs(Ns.TEXT, "num-format")
             val props = level.firstNs(Ns.TEXT, "list-level-properties")
-            val prefix = props?.attrNs(Ns.STYLE, "num-prefix").orEmpty()
-            val suffix = props?.attrNs(Ns.STYLE, "num-suffix").orEmpty()
+            // Real ODF puts num-prefix/num-suffix on the level element itself;
+            // tolerate the properties-node variant some producers emit.
+            val prefix = level.attrNs(Ns.STYLE, "num-prefix")
+                ?: props?.attrNs(Ns.STYLE, "num-prefix").orEmpty()
+            val suffix = level.attrNs(Ns.STYLE, "num-suffix")
+                ?: props?.attrNs(Ns.STYLE, "num-suffix").orEmpty()
             levels[index] = ListLevel(
                 level = index,
                 format = format,
-                levelText = "$prefix%1$suffix",
+                // ODF substitutes the level's own 1-based number: %1, %2, …
+                levelText = "$prefix%$index$suffix",
                 start = level.attrNs(Ns.TEXT, "start-value")?.toIntOrNull(),
                 indentPoints = Units.parseOdfLength(props?.attrNs(Ns.FO, "text-indent"))
             )

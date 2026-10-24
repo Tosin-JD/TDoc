@@ -9,6 +9,7 @@ import com.tosin.docprocessor.domain.document.model.BlockNode
 import com.tosin.docprocessor.domain.document.model.CommentDefinition
 import com.tosin.docprocessor.domain.document.model.InlineNode
 import com.tosin.docprocessor.domain.document.model.NoteKind
+import com.tosin.docprocessor.domain.document.model.RevisionKind
 import com.tosin.docprocessor.domain.document.model.SourceAnchor
 import com.tosin.docprocessor.domain.document.model.style.TextStyle
 import org.w3c.dom.Element
@@ -40,16 +41,41 @@ class OdfInlineMapper(
 
     fun parse(container: Element, style: TextStyle): List<InlineNode> {
         val output = mutableListOf<InlineNode>()
+        // Open tracked-change range (`text:change-start` … `text:change-end`).
+        var changeBuffer: MutableList<InlineNode>? = null
         val children = container.childNodes
         for (index in 0 until children.length) {
             when (val node = children.item(index)) {
                 is org.w3c.dom.Text -> if (node.nodeValue.isNotEmpty()) {
-                    output += InlineNode.Text(node.nodeValue, style, SourceAnchor(context.part, "text()"))
+                    val text = InlineNode.Text(node.nodeValue, style, SourceAnchor(context.part, "text()"))
+                    if (changeBuffer != null) changeBuffer += text else output += text
                 }
-                is Element -> output += parseElement(node, style)
+                is Element -> when {
+                    node.matchesNs(Ns.TEXT, "change-start") -> changeBuffer = mutableListOf()
+                    node.matchesNs(Ns.TEXT, "change-end") -> {
+                        val buffered = changeBuffer
+                        changeBuffer = null
+                        output += InlineNode.Revision(
+                            kind = RevisionKind.INSERTION,
+                            children = buffered.orEmpty(),
+                            anchor = SourceAnchor(context.part, "text:change-end")
+                        )
+                    }
+                    else -> {
+                        val parsed = parseElement(node, style)
+                        if (changeBuffer != null) changeBuffer?.addAll(parsed) else output += parsed
+                    }
+                }
                 else -> if (node.nodeType == Node.CDATA_SECTION_NODE && !node.nodeValue.isNullOrEmpty()) {
-                    output += InlineNode.Text(node.nodeValue, style, SourceAnchor(context.part, "text()"))
+                    val text = InlineNode.Text(node.nodeValue.orEmpty(), style, SourceAnchor(context.part, "text()"))
+                    if (changeBuffer != null) changeBuffer += text else output += text
                 }
+            }
+        }
+        // Unmatched start: keep the partial content visible inside a revision.
+        changeBuffer?.let { buffered ->
+            if (buffered.isNotEmpty()) {
+                output += InlineNode.Revision(kind = RevisionKind.INSERTION, children = buffered)
             }
         }
         return output
@@ -114,22 +140,73 @@ class OdfInlineMapper(
                 )
             )
             element.matchesNs(Ns.DRAW, "frame") -> listOf(frameMapper.parseInlineFrame(element))
-            element.matchesNs(Ns.TEXT, "change") || element.matchesNs(Ns.TEXT, "change-start") ||
-                element.matchesNs(Ns.TEXT, "change-end") -> {
-                context.diagnostics.preserve("text:${element.localName}", "inline")
+            element.matchesNs(Ns.TEXT, "change") -> {
+                // Standalone marker; the change payload lives in tracked-changes.
+                val cached = element.textContent?.trim().orEmpty()
                 listOf(
-                    InlineNode.Opaque(
-                        com.tosin.docprocessor.data.parser.common.OpaqueFragmentCapture.capture(
-                            element, anchor, "tracked change not rendered"
-                        )
+                    InlineNode.Revision(
+                        kind = RevisionKind.INSERTION,
+                        children = listOfNotNull(
+                            cached.takeIf { it.isNotEmpty() }?.let { InlineNode.Text(it, style, anchor) }
+                        ),
+                        anchor = anchor
                     )
                 )
             }
             element.matchesNs(Ns.TEXT, "number") ->
                 listOf(InlineNode.Text(element.textContent.orEmpty(), style, anchor))
             element.matchesNs(Ns.TEXT, "note-citation") -> emptyList()
+            element.namespaceURI == Ns.TEXT && FIELD_KINDS.containsKey(element.localName) ->
+                listOf(textField(element, style, anchor))
             else -> parse(element, style)
         }
+    }
+
+    /**
+     * ODF text fields (`text:page-number`, `text:ref`, `text:sequence`, …)
+     * become [InlineNode.Field] nodes with the cached display text as `result`
+     * — the same shape DOCX fields take, so header/footer stories keep their
+     * page numbers instead of silently losing them.
+     */
+    private fun textField(element: Element, style: TextStyle, anchor: SourceAnchor): InlineNode {
+        val local = element.localName.orEmpty()
+        val reference = element.attrNs(Ns.TEXT, "ref-name") ?: element.attrNs(Ns.TEXT, "name")
+        val cached = element.textContent?.trim().orEmpty()
+        return InlineNode.Field(
+            kind = FIELD_KINDS[local] ?: local.uppercase(),
+            instruction = listOfNotNull("text:$local", reference).joinToString(separator = " "),
+            result = listOfNotNull(
+                cached.takeIf { it.isNotEmpty() }?.let { InlineNode.Text(it, style, anchor) }
+            ),
+            isSimple = true,
+            anchor = anchor
+        )
+    }
+
+    private companion object {
+        /** ODF field element local name → field kind (aligned with DOCX names). */
+        val FIELD_KINDS = mapOf(
+            "page-number" to "PAGE",
+            "page-count" to "NUMPAGES",
+            "file-name" to "FILENAME",
+            "file-extension" to "FILEEXT",
+            "template-name" to "TEMPLATE",
+            "sheet-name" to "SHEETNAME",
+            "chapter" to "CHAPTER",
+            "sequence" to "SEQUENCE",
+            "sequence-set" to "SEQUENCE",
+            "ref" to "REF",
+            "date" to "DATE",
+            "time" to "TIME",
+            "title" to "TITLE",
+            "subject" to "SUBJECT",
+            "description" to "DESCRIPTION",
+            "keywords" to "KEYWORDS",
+            "initial-creator" to "AUTHOR",
+            "creator" to "LASTMODIFIEDBY",
+            "editing-cycles" to "REVISION",
+            "printing-name" to "PRINTING"
+        )
     }
 
     private fun parseNote(element: Element, style: TextStyle): InlineNode {

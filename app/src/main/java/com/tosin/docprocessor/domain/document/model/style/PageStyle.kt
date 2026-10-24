@@ -19,6 +19,15 @@ data class PageStyle(
     val margins: PageMargins = PageMargins(),
     val columns: Int? = null,
     val columnSpacingPoints: Double? = null,
+    /** Explicit column widths when the layout is not equal-width. */
+    val columnWidths: List<Double?> = emptyList(),
+    /** Vertical alignment of the page body: `top` / `center` / `both`. */
+    val verticalAlign: String? = null,
+    val pageBorders: CellBorders? = null,
+    val lineNumberingStep: Int? = null,
+    /** Footnote/endnote placement relative to the body (`topBottom`, `pageBottom`). */
+    val notePlacement: String? = null,
+    /** Page background color (hex or CSS name) when declared. */
     val background: String? = null
 )
 

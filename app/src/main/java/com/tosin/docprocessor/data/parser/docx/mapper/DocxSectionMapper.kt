@@ -7,6 +7,7 @@ import com.tosin.docprocessor.data.parser.common.wAttr
 import com.tosin.docprocessor.data.parser.common.wFirst
 import com.tosin.docprocessor.data.parser.docx.opc.OpcPackage
 import com.tosin.docprocessor.data.parser.docx.resolve.DocxNumberingResolver
+import com.tosin.docprocessor.data.parser.docx.resolve.DocxSectionProperties
 import com.tosin.docprocessor.data.parser.docx.resolve.DocxStyleResolver
 import com.tosin.docprocessor.domain.document.model.BlockNode
 import com.tosin.docprocessor.domain.document.model.CommentDefinition
@@ -17,9 +18,6 @@ import com.tosin.docprocessor.domain.document.model.NoteKind
 import com.tosin.docprocessor.domain.document.model.SourceAnchor
 import com.tosin.docprocessor.domain.document.model.Units
 import com.tosin.docprocessor.domain.document.model.style.HeaderFooterVariant
-import com.tosin.docprocessor.domain.document.model.style.PageMargins
-import com.tosin.docprocessor.domain.document.model.style.PageOrientation
-import com.tosin.docprocessor.domain.document.model.style.PageStyle
 import com.tosin.docprocessor.domain.document.model.style.SectionStyle
 import org.w3c.dom.Document
 import org.w3c.dom.Element
@@ -65,7 +63,9 @@ class DocxSectionMapper(
             paragraph.wFirst("pPr")?.wFirst("sectPr")?.let(sectPrs::add)
         }
         body.wFirst("sectPr")?.let(sectPrs::add)
-        return sectPrs.mapIndexed { index, sectPr -> parseSectionStyle(sectPr, index + 1, settings) }
+        return sectPrs.mapIndexed { index, sectPr ->
+            DocxSectionProperties.parse(sectPr, index + 1, settings.evenAndOddHeaders)
+        }
     }
 
     fun parseHeaderFooters(body: Element, settings: DocumentSettings): List<HeaderFooterStory> {
@@ -153,40 +153,6 @@ class DocxSectionMapper(
                 anchor = SourceAnchor(part, "w:$tag")
             )
         }.toMap()
-    }
-
-    private fun parseSectionStyle(sectPr: Element, index: Int, settings: DocumentSettings): SectionStyle {
-        val pgSz = sectPr.wFirst("pgSz")
-        val pgMar = sectPr.wFirst("pgMar")
-        val cols = sectPr.wFirst("cols")
-        val orientation = when (pgSz?.wAttr("orient")?.lowercase()) {
-            "landscape" -> PageOrientation.LANDSCAPE
-            "portrait" -> PageOrientation.PORTRAIT
-            else -> null
-        }
-        return SectionStyle(
-            index = index,
-            type = sectPr.wFirst("type")?.wAttr("val"),
-            page = PageStyle(
-                widthPoints = Units.twipsToPoints(pgSz?.wAttr("w")?.toIntOrNull()),
-                heightPoints = Units.twipsToPoints(pgSz?.wAttr("h")?.toIntOrNull()),
-                orientation = orientation,
-                margins = PageMargins(
-                    topPoints = Units.twipsToPoints(pgMar?.wAttr("top")?.toIntOrNull()),
-                    rightPoints = Units.twipsToPoints(pgMar?.wAttr("right")?.toIntOrNull()),
-                    bottomPoints = Units.twipsToPoints(pgMar?.wAttr("bottom")?.toIntOrNull()),
-                    leftPoints = Units.twipsToPoints(pgMar?.wAttr("left")?.toIntOrNull()),
-                    headerPoints = Units.twipsToPoints(pgMar?.wAttr("header")?.toIntOrNull()),
-                    footerPoints = Units.twipsToPoints(pgMar?.wAttr("footer")?.toIntOrNull()),
-                    gutterPoints = Units.twipsToPoints(pgMar?.wAttr("gutter")?.toIntOrNull())
-                ),
-                columns = cols?.wAttr("num")?.toIntOrNull(),
-                columnSpacingPoints = Units.twipsToPoints(cols?.wAttr("space")?.toIntOrNull())
-            ),
-            pageNumberStart = sectPr.wFirst("pgNumType")?.wAttr("start")?.toIntOrNull(),
-            hasDifferentFirstPage = sectPr.wFirst("titlePg") != null,
-            hasDifferentEvenOdd = settings.evenAndOddHeaders
-        )
     }
 
     private fun variantOf(type: String?): HeaderFooterVariant = when (type?.lowercase()) {

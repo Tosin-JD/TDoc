@@ -36,6 +36,15 @@ class OdfFrameMapper(private val context: OdfMapContext) {
                 )
             }
         }
+        val inlineTextBox = frame.firstNs(Ns.DRAW, "text-box")
+        if (inlineTextBox != null && ::blockMapper.isInitialized) {
+            context.diagnostics.info("draw:text-box", "Mapped inline text box")
+            return InlineNode.TextBox(
+                blocks = blockMapper.parseBlocks(inlineTextBox),
+                frameStyle = frameStyle(frame),
+                anchor = SourceAnchor(context.part, "draw:text-box")
+            )
+        }
         context.diagnostics.preserve("draw:frame", "inline")
         return InlineNode.Opaque(
             com.tosin.docprocessor.data.parser.common.OpaqueFragmentCapture.capture(
@@ -87,8 +96,36 @@ class OdfFrameMapper(private val context: OdfMapContext) {
             FrameAnchor.INLINE
         } else FrameAnchor.ANCHORED,
         widthPoints = Units.parseOdfLength(frame.attrNs(Ns.SVG, "width")),
-        heightPoints = Units.parseOdfLength(frame.attrNs(Ns.SVG, "height"))
+        heightPoints = Units.parseOdfLength(frame.attrNs(Ns.SVG, "height")),
+        positionXPoints = Units.parseOdfLength(frame.attrNs(Ns.SVG, "x")),
+        positionYPoints = Units.parseOdfLength(frame.attrNs(Ns.SVG, "y")),
+        rotationDegrees = rotationOf(frame),
+        wrapStyle = wrapStyleOf(frame),
+        zOrder = frame.attrNs(Ns.DRAW, "z-index")?.toIntOrNull()
     )
+
+    /** ODF rotation arrives as part of `draw:transform` (`rotate(x)` in degrees). */
+    private fun rotationOf(frame: Element): Double? {
+        val transform = frame.attrNs(Ns.DRAW, "transform") ?: return null
+        return Regex("""rotate\(\s*(-?[0-9.]+)""").find(transform)
+            ?.groupValues?.get(1)?.toDoubleOrNull()
+    }
+
+    /** Wrap via the `draw:wrap-*` child elements; style `style:wrap` is a fallback. */
+    private fun wrapStyleOf(frame: Element): String? {
+        val children = listOf(
+            "wrap-none" to "none",
+            "wrap-off" to "none",
+            "wrap-square" to "square",
+            "wrap-parallel" to "parallel",
+            "wrap-top-and-bottom" to "topAndBottom",
+            "wrap-through" to "through"
+        )
+        for ((local, style) in children) {
+            if (frame.firstNs(Ns.DRAW, local) != null) return style
+        }
+        return frame.attrNs(Ns.STYLE, "wrap")
+    }
 
     private fun title(frame: Element, local: String): String? =
         frame.firstNs(Ns.SVG, local)?.textContent?.trim()?.takeIf { it.isNotEmpty() }

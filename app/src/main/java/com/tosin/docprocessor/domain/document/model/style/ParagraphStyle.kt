@@ -28,6 +28,8 @@ data class ParagraphStyle(
     val widowControl: Boolean? = null,
     val outlineLevel: Int? = null,
     val tabs: List<TabStop> = emptyList(),
+    /** ODF only: master page bound to paragraphs carrying this style. */
+    val masterPageName: String? = null,
     val borders: List<Border> = emptyList(),
     val shading: Shading? = null,
     val defaultRunStyle: TextStyle? = null
@@ -52,6 +54,7 @@ data class ParagraphStyle(
         widowControl = other.widowControl ?: widowControl,
         outlineLevel = other.outlineLevel ?: outlineLevel,
         tabs = if (other.tabs.isNotEmpty()) other.tabs else tabs,
+        masterPageName = other.masterPageName ?: masterPageName,
         borders = if (other.borders.isNotEmpty()) other.borders else borders,
         shading = other.shading ?: shading,
         defaultRunStyle = when {

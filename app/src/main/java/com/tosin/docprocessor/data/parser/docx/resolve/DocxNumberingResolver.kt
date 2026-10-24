@@ -1,5 +1,6 @@
 package com.tosin.docprocessor.data.parser.docx.resolve
 
+import com.tosin.docprocessor.data.parser.common.ListMarkerFormatter
 import com.tosin.docprocessor.data.parser.common.Ns
 import com.tosin.docprocessor.data.parser.common.firstNs
 import com.tosin.docprocessor.data.parser.common.w
@@ -41,18 +42,25 @@ class DocxNumberingResolver private constructor(
     fun kind(numId: String?, ilvl: Int): ListKind =
         if (isOrdered(numId, ilvl)) ListKind.ORDERED else ListKind.UNORDERED
 
-    /** Renders a best-effort list marker label for the given level. */
+    /**
+     * Renders a best-effort list marker label for the given level.
+     *
+     * @param number 1-based sequence index of the item within its level; the
+     *        level's start value is applied here so callers can pass a plain
+     *        per-level counter from [com.tosin.docprocessor.data.parser.common.ListNumberingState].
+     */
     fun marker(numId: String?, ilvl: Int, number: Int): String? {
         val level = resolve(numId, ilvl) ?: return null
         if (!isOrdered(numId, ilvl)) {
             return level.bulletChar ?: level.levelText?.takeIf { it.length <= 2 }
         }
-        val template = level.levelText ?: "%${ilvl + 1}."
         val value = (level.start ?: 1) + (number - 1)
-        return template
-            .replace(Regex("%${ilvl + 1}"), value.toString())
-            .replace(Regex("%\\d"), value.toString())
-            .trim()
+        return ListMarkerFormatter.render(
+            template = level.levelText ?: "%${ilvl + 1}.",
+            value = value,
+            format = ListMarkerFormatter.parseFormat(level.format),
+            levelNumber = ilvl + 1
+        )
     }
 
     private data class AbstractNumDef(val id: String, val levels: Map<Int, ListLevel>)

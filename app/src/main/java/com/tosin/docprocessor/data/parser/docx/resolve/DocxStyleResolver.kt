@@ -5,6 +5,7 @@ import com.tosin.docprocessor.data.parser.common.wAttr
 import com.tosin.docprocessor.data.parser.common.wFirst
 import com.tosin.docprocessor.domain.document.model.StyleCatalogue
 import com.tosin.docprocessor.domain.document.model.style.ParagraphStyle
+import com.tosin.docprocessor.domain.document.model.style.TableBandFlags
 import com.tosin.docprocessor.domain.document.model.style.TableStyle
 import com.tosin.docprocessor.domain.document.model.style.TextStyle
 import org.w3c.dom.Document
@@ -153,8 +154,17 @@ class DocxStyleResolver private constructor(
         private fun parseTableStyle(style: Element): TableStyle {
             val tblPr = style.wFirst("tblPr")
             return TableStyle(
-                styleName = style.wFirst("name")?.wAttr("val")
-            ).copy(
+                styleName = style.wFirst("name")?.wAttr("val"),
+                borders = DocxBorderProperties.parseCellBorders(tblPr?.wFirst("tblBorders")),
+                cellMargins = DocxBorderProperties.parseCellMargins(tblPr?.wFirst("tblCellMar")),
+                banding = TableBandFlags(
+                    firstRow = hasStylePr(style, "firstRow"),
+                    lastRow = hasStylePr(style, "lastRow"),
+                    firstColumn = hasStylePr(style, "firstColumn"),
+                    lastColumn = hasStylePr(style, "lastColumn"),
+                    band1 = hasStylePr(style, "band1Horz") || hasStylePr(style, "band1Vert"),
+                    band2 = hasStylePr(style, "band2Horz") || hasStylePr(style, "band2Vert")
+                ),
                 shading = tblPr?.wFirst("shd")?.let {
                     com.tosin.docprocessor.domain.document.model.style.Shading(
                         fill = it.wAttr("fill"),
@@ -163,5 +173,8 @@ class DocxStyleResolver private constructor(
                 }
             )
         }
+
+        private fun hasStylePr(style: Element, type: String): Boolean =
+            style.w("tblStylePr").any { it.wAttr("type") == type }
     }
 }
