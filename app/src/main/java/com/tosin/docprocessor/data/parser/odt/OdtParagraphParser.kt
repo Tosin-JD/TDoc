@@ -150,7 +150,7 @@ class OdtParagraphParser(
         isItalic = style?.isItalic ?: false,
         isUnderline = (style?.isUnderline ?: false) || hyperlink != null,
         color = style?.color ?: if (hyperlink != null) "0000EE" else "000000",
-        fontSize = style?.fontSize?.toInt(),
+        fontSize = style?.fontSize,
         hyperlink = hyperlink
     )
 }

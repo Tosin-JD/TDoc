@@ -19,8 +19,13 @@ sealed class DocumentElement {
         override val id: String = UUID.randomUUID().toString(),
         val rows: List<List<String>>,
         val hasHeader: Boolean = false,
-        val metadata: TableMetadata = TableMetadata()
+        val metadata: TableMetadata = TableMetadata(),
+        /** Rich per-cell content carrying styled spans. Populated by [LegacyElementAdapter]. */
+        val richRows: List<List<com.tosin.docprocessor.data.parser.internal.models.RichTableCell>> = emptyList(),
+        /** Parsed column grid widths in points (from `w:tblGrid`). Empty = use heuristic. */
+        val gridColumnWidthsPt: List<Float> = emptyList()
     ) : DocumentElement()
+
 
     data class Image(
         override val id: String = UUID.randomUUID().toString(),

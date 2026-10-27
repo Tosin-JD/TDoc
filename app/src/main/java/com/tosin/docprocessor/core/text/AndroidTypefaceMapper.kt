@@ -34,5 +34,8 @@ object AndroidTypefaceMapper {
         FontFamilyKey.MONOSPACE -> "monospace"
         FontFamilyKey.SANS_SERIF, FontFamilyKey.DEFAULT -> "sans-serif"
         FontFamilyKey.CURSIVE -> "cursive"
+        FontFamilyKey.CARLITO, FontFamilyKey.LIBERATION_SANS -> "sans-serif"
+        FontFamilyKey.LIBERATION_SERIF -> "serif"
+        FontFamilyKey.DEJAVU_MONO -> "monospace"
     }
 }

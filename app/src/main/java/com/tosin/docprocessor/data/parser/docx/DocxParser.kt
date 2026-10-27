@@ -471,7 +471,7 @@ class DocxParser(
                 isSuperscript = runProperties?.descendants("vertAlign")?.firstOrNull()?.attribute("val") == "superscript",
                 isSubscript = runProperties?.descendants("vertAlign")?.firstOrNull()?.attribute("val") == "subscript",
                 fontFamily = runProperties?.descendants("rFonts")?.firstOrNull()?.attribute("ascii"),
-                fontSize = runProperties?.descendants("sz")?.firstOrNull()?.attribute("val")?.toIntOrNull()?.div(2),
+                fontSize = runProperties?.descendants("sz")?.firstOrNull()?.attribute("val")?.toIntOrNull()?.div(2)?.toFloat(),
                 color = runProperties?.descendants("color")?.firstOrNull()?.attribute("val") ?: "000000",
                 highlightColor = runProperties?.firstChild("highlight")?.attribute("val"),
                 language = runProperties?.firstChild("lang")?.attribute("val"),

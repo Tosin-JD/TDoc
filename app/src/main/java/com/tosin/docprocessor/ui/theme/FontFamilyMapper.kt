@@ -14,5 +14,7 @@ fun FontFamilyKey.toComposeFontFamily(): FontFamily = when (this) {
     FontFamilyKey.SERIF -> FontFamily.Serif
     FontFamilyKey.MONOSPACE -> FontFamily.Monospace
     FontFamilyKey.CURSIVE -> FontFamily.Cursive
-    FontFamilyKey.SANS_SERIF, FontFamilyKey.DEFAULT -> FontFamily.SansSerif
+    FontFamilyKey.SANS_SERIF, FontFamilyKey.DEFAULT, FontFamilyKey.CARLITO, FontFamilyKey.LIBERATION_SANS -> FontFamily.SansSerif
+    FontFamilyKey.LIBERATION_SERIF -> FontFamily.Serif
+    FontFamilyKey.DEJAVU_MONO -> FontFamily.Monospace
 }

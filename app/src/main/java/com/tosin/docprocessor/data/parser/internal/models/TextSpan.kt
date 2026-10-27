@@ -10,7 +10,7 @@ data class TextSpan(
     val isSubscript: Boolean = false,
     val isHidden: Boolean = false,
     val fontFamily: String? = null,
-    val fontSize: Int? = null,
+    val fontSize: Float? = null,
     val color: String = "000000",
     val highlightColor: String? = null,
     val characterSpacing: Int? = null,

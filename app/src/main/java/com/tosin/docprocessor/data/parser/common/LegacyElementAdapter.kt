@@ -323,7 +323,7 @@ class LegacyElementAdapter {
         isSubscript = style.verticalAlign == VerticalAlign.SUBSCRIPT,
         isHidden = style.hidden == true,
         fontFamily = style.fontAscii ?: style.fontHAnsi,
-        fontSize = style.fontSizePoints?.let { Math.round(it).toInt() },
+        fontSize = style.fontSizePoints?.toFloat(),
         color = style.color?.removePrefix("#") ?: "000000",
         highlightColor = style.highlight,
         characterSpacing = style.letterSpacingPoints?.times(20)?.toInt(),
