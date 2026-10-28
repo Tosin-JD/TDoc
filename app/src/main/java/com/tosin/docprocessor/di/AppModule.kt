@@ -14,10 +14,17 @@ import com.tosin.docprocessor.data.repository.DocumentRepository
 import com.tosin.docprocessor.data.repository.DocumentRepositoryImpl
 import com.tosin.docprocessor.domain.typography.FontFamilyResolver
 import com.tosin.docprocessor.domain.typography.TextFlowResolver
+import com.tosin.docprocessor.domain.pagination.PaginationEngineFactory
 
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+
+    @Provides
+    @Singleton
+    fun providePaginationEngineFactory(@ApplicationContext context: Context): PaginationEngineFactory {
+        return PaginationEngineFactory(context)
+    }
 
     @Provides
     @Singleton

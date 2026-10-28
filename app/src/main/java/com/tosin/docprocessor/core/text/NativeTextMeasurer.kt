@@ -26,7 +26,12 @@ class NativeTextMeasurer(
         val textHash: Int,
         val paintKey: TextPaintKey,
         val widthPx: Int,
-        val alignment: Layout.Alignment
+        val alignment: Layout.Alignment,
+        val lineSpacingPx: Float = 0f,
+        val lineSpacingMultiplier: Float = 1f,
+        val justificationMode: Int = Layout.JUSTIFICATION_MODE_NONE,
+        val firstLineIndentPx: Int = 0,
+        val restLineIndentPx: Int = 0
     )
     
     @WorkerThread
@@ -54,7 +59,12 @@ class NativeTextMeasurer(
         text: CharSequence,
         paintKey: TextPaintKey,
         widthPt: Float,
-        alignment: Layout.Alignment = Layout.Alignment.ALIGN_NORMAL
+        alignment: Layout.Alignment = Layout.Alignment.ALIGN_NORMAL,
+        lineSpacingPx: Float = 0f,
+        lineSpacingMultiplier: Float = 1f,
+        justificationMode: Int = Layout.JUSTIFICATION_MODE_NONE,
+        firstLineIndentPx: Int = 0,
+        restLineIndentPx: Int = 0
     ): StaticLayout {
         val paint = paintCache.getPaint(paintKey)
         val widthPx = unitConverter.ptToPx(widthPt).toInt().coerceAtLeast(1)
@@ -62,18 +72,39 @@ class NativeTextMeasurer(
             textHash = text.hashCode(),
             paintKey = paintKey,
             widthPx = widthPx,
-            alignment = alignment
+            alignment = alignment,
+            lineSpacingPx = lineSpacingPx,
+            lineSpacingMultiplier = lineSpacingMultiplier,
+            justificationMode = justificationMode,
+            firstLineIndentPx = firstLineIndentPx,
+            restLineIndentPx = restLineIndentPx
         )
         
         return layoutCache.getOrPut(key) {
             @Suppress("DEPRECATION")
-            StaticLayout.Builder.obtain(text, 0, text.length, paint, widthPx)
+            val builder = StaticLayout.Builder.obtain(text, 0, text.length, paint, widthPx)
                 .setAlignment(alignment)
-                .setLineSpacing(0f, 1f)
+                .setLineSpacing(lineSpacingPx, lineSpacingMultiplier)
                 .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
                 .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
                 .setIncludePad(false)
-                .build()
+
+            if (justificationMode != Layout.JUSTIFICATION_MODE_NONE) {
+                builder.setJustificationMode(justificationMode)
+            }
+
+            if (firstLineIndentPx != 0 || restLineIndentPx != 0) {
+                val indents = IntArray(text.length + 1)
+                if (text.isNotEmpty()) {
+                    indents[0] = firstLineIndentPx.coerceAtLeast(0)
+                }
+                for (i in 1..text.length) {
+                    indents[i] = restLineIndentPx.coerceAtLeast(0)
+                }
+                builder.setIndents(indents, null)
+            }
+
+            builder.build()
         }
     }
     

@@ -6,6 +6,8 @@ import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.layout.ElementIndentation
 import com.tosin.docprocessor.domain.model.layout.LayoutRect
 import com.tosin.docprocessor.domain.model.layout.LayoutResult
+import com.tosin.docprocessor.domain.model.DocumentElementMapper
+import com.tosin.docprocessor.domain.model.RenderableElement
 import com.tosin.docprocessor.domain.model.layout.PageDimensions
 import com.tosin.docprocessor.domain.model.layout.PageModel
 import com.tosin.docprocessor.domain.model.layout.PageState
@@ -50,14 +52,8 @@ class PrintPaginator(
     override fun paginate(
         data: DocumentData,
         dimensions: PageDimensions,
-        startIndex: Int
-    ): List<PageModel> = paginate(data, dimensions, startIndex, isDarkMode = false)
-
-    fun paginate(
-        data: DocumentData,
-        dimensions: PageDimensions,
-        startIndex: Int = 0,
-        isDarkMode: Boolean = false
+        startIndex: Int,
+        isDarkMode: Boolean
     ): List<PageModel> {
         val headerFooterElements = data.content.filterIsInstance<DocumentElement.HeaderFooter>()
         val headers = headerFooterElements.filter { it.content.kind == HeaderFooterKind.HEADER }
@@ -187,14 +183,19 @@ class PrintPaginator(
         rect: LayoutRect,
         pageIndex: Int,
         isDarkMode: Boolean
-    ): PositionedElement {
-        val bounds = RectF(rect.left, rect.top, rect.right, rect.bottom)
-        return PositionedElement(
-            elementId = element.id,
-            element = element,
+    ): RenderableElement {
+        val bounds = RectF(
+            unitConverter.ptToPx(rect.left),
+            unitConverter.ptToPx(rect.top),
+            unitConverter.ptToPx(rect.right),
+            unitConverter.ptToPx(rect.bottom)
+        )
+        val textLayout = (buildTextLayoutResult(element.content.text, rect.width(), isDarkMode) as? LayoutResult.TextLayout)?.layout
+        return RenderableElement(
+            element = DocumentElementMapper.toDocumentBlock(element),
             pageIndex = pageIndex,
             bounds = bounds,
-            layoutResult = buildTextLayoutResult(element.content.text, rect.width(), isDarkMode)
+            layout = textLayout
         )
     }
 
@@ -425,7 +426,8 @@ class PrintPaginator(
     }
 
     private fun measureElement(element: DocumentElement, dimensions: PageDimensions): Float {
-        registry.get(element.id, element)?.let { return it }
+        val widthPt = dimensions.printableWidth
+        registry.get(element.id, element, widthPt)?.let { return it }
 
         val height = when (element) {
             is DocumentElement.Paragraph -> {
@@ -460,7 +462,7 @@ class PrintPaginator(
             else -> 10f
         }
 
-        registry.put(element.id, element, height)
+        registry.put(element.id, element, height, widthPt)
         return height
     }
 
@@ -803,10 +805,24 @@ class PrintPaginator(
         elements: List<PositionedElement>,
         dimensions: PageDimensions
     ): PageModel {
+        val renderableElements = elements.map { positioned ->
+            RenderableElement(
+                element = DocumentElementMapper.toDocumentBlock(positioned.element),
+                pageIndex = positioned.pageIndex,
+                bounds = RectF(
+                    unitConverter.ptToPx(positioned.bounds.left),
+                    unitConverter.ptToPx(positioned.bounds.top),
+                    unitConverter.ptToPx(positioned.bounds.right),
+                    unitConverter.ptToPx(positioned.bounds.bottom)
+                ),
+                indentation = positioned.indentation,
+                layout = (positioned.layoutResult as? LayoutResult.TextLayout)?.layout
+            )
+        }
         return PageModel(
             index = index,
             dimensions = dimensions,
-            elements = elements,
+            elements = renderableElements,
             state = PageState.CLEAN
         )
     }

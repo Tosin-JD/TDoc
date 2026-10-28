@@ -18,22 +18,27 @@ import com.tosin.docprocessor.domain.model.DocumentElement
  * If hash == old hash, we skip re-measuring and reuse the cached height.
  */
 class LayoutRegistry {
-    /**
-     * Map: elementId -> (contentHash, heightInPt)
-     */
-    private val heightCache = mutableMapOf<String, CachedMeasurement>()
-
-    /**
-     * Map: elementId -> elementType (Paragraph, Table, Image, etc.)
-     * Used to categorize elements as Atomic or Flowable.
-     */
-    private val elementTypeCache = mutableMapOf<String, ElementType>()
+    data class CacheKey(
+        val elementId: String,
+        val widthPt: Float = 0f
+    )
 
     data class CachedMeasurement(
         val contentHash: Long,
         val heightPt: Float,
         val timestamp: Long = System.currentTimeMillis()
     )
+
+    /**
+     * Map: CacheKey -> (contentHash, heightInPt)
+     */
+    private val heightCache = mutableMapOf<CacheKey, CachedMeasurement>()
+
+    /**
+     * Map: elementId -> elementType (Paragraph, Table, Image, etc.)
+     * Used to categorize elements as Atomic or Flowable.
+     */
+    private val elementTypeCache = mutableMapOf<String, ElementType>()
 
     enum class ElementType {
         FLOWABLE,  // Can be split across pages (Paragraph, Section)
@@ -47,10 +52,12 @@ class LayoutRegistry {
      * @param elementId The unique ID of the element
      * @param element The element itself (for computing content hash)
      * @param heightPt The measured height in Points
+     * @param widthPt The effective layout width in Points
      */
-    fun put(elementId: String, element: DocumentElement, heightPt: Float) {
+    fun put(elementId: String, element: DocumentElement, heightPt: Float, widthPt: Float = 0f) {
         val contentHash = computeContentHash(element)
-        heightCache[elementId] = CachedMeasurement(contentHash, heightPt)
+        val key = CacheKey(elementId, widthPt)
+        heightCache[key] = CachedMeasurement(contentHash, heightPt)
         elementTypeCache[elementId] = classifyElement(element)
     }
 
@@ -59,13 +66,14 @@ class LayoutRegistry {
      *
      * @return The cached height in Points, or null if not cached or hash mismatch
      */
-    fun get(elementId: String, element: DocumentElement): Float? {
-        val cached = heightCache[elementId] ?: return null
+    fun get(elementId: String, element: DocumentElement, widthPt: Float = 0f): Float? {
+        val key = CacheKey(elementId, widthPt)
+        val cached = heightCache[key] ?: return null
         val currentHash = computeContentHash(element)
         
         // Hash mismatch means content changed; invalidate cache
         if (cached.contentHash != currentHash) {
-            heightCache.remove(elementId)
+            heightCache.remove(key)
             return null
         }
         
@@ -94,20 +102,16 @@ class LayoutRegistry {
      * Call this when the element is edited.
      */
     fun invalidate(elementId: String) {
-        heightCache.remove(elementId)
+        val keysToRemove = heightCache.keys.filter { it.elementId == elementId }
+        keysToRemove.forEach { heightCache.remove(it) }
         elementTypeCache.remove(elementId)
     }
 
     /**
-     * Invalidate all cache entries from a given index onwards.
-     * Call this when content is inserted/deleted (causes cascading changes).
-     *
-     * @param fromIndexInclusive The index from which to invalidate
+     * Invalidate multiple elements by ID.
      */
-    fun invalidateFrom(fromIndexInclusive: Int) {
-        // This is called when elements are inserted/deleted
-        // Since we use element IDs (not indices), this is less critical here
-        // But we provide it for incremental paginator logic
+    fun invalidateAll(elementIds: Collection<String>) {
+        elementIds.forEach { invalidate(it) }
     }
 
     /**
