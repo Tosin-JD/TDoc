@@ -1,6 +1,7 @@
 package com.tosin.docprocessor.domain.pagination
 
 import com.tosin.docprocessor.data.parser.internal.models.SectionProperties
+import com.tosin.docprocessor.domain.model.layout.PageDimensions
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -25,5 +26,18 @@ class SectionResolverTest {
         val section = SectionProperties(sectionIndex = 0, source = "test")
         val dims = resolver.resolve(section)
         assertEquals(72f, dims.marginLeft, 0.01f)
+    }
+
+    @Test
+    fun `missing or invalid page dimensions fall back to A4`() {
+        val section = SectionProperties(
+            sectionIndex = 0,
+            source = "test",
+            pageWidth = -1,
+            pageHeight = 0
+        )
+        val dims = resolver.resolve(section)
+        assertEquals(PageDimensions.A4.width, dims.width, 0.01f)
+        assertEquals(PageDimensions.A4.height, dims.height, 0.01f)
     }
 }

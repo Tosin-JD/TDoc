@@ -10,7 +10,9 @@ data class PageModel(
     val headerElements: List<PositionedElement> = emptyList(),
     val footerElements: List<PositionedElement> = emptyList(),
     val sectionIndex: Int = 0,
-    val state: PageState = PageState.CLEAN
+    val state: PageState = PageState.CLEAN,
+    val stableKey: String = "",
+    val documentFingerprint: Long = 0L
 )
 
 enum class PageState { 

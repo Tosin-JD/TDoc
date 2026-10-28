@@ -15,8 +15,8 @@ class SectionResolver {
 
     fun resolve(section: SectionProperties): PageDimensions {
         return PageDimensions(
-            width = section.pageWidth?.let { twipsToPt(it) } ?: 612f,
-            height = section.pageHeight?.let { twipsToPt(it) } ?: 792f,
+            width = section.pageWidth?.takeIf { it > 0 }?.let { twipsToPt(it) } ?: PageDimensions.A4.width,
+            height = section.pageHeight?.takeIf { it > 0 }?.let { twipsToPt(it) } ?: PageDimensions.A4.height,
             marginLeft = section.margins.left?.let { twipsToPt(it) } ?: 72f,
             marginTop = section.margins.top?.let { twipsToPt(it) } ?: 72f,
             marginRight = section.margins.right?.let { twipsToPt(it) } ?: 72f,

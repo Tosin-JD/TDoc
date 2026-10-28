@@ -3,27 +3,28 @@ package com.tosin.docprocessor.ui.editor.layouts.print
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -33,11 +34,13 @@ import com.tosin.docprocessor.domain.model.layout.PageModel
 import com.tosin.docprocessor.domain.model.layout.PositionedElement
 import com.tosin.docprocessor.domain.pagination.UnitConverter
 import com.tosin.docprocessor.ui.editor.EditorViewModel
+import com.tosin.docprocessor.ui.editor.renderer.AnnotatedStringMappers.toAnnotatedString
 import kotlin.math.min
 
 @Composable
 fun PageView(
     pageModel: PageModel,
+    pageCount: Int,
     renderer: PrintElementRenderer,
     unitConverter: UnitConverter,
     viewModel: EditorViewModel,
@@ -69,26 +72,32 @@ fun PageView(
                         scale(scaleX = pageScale, scaleY = pageScale, pivot = Offset.Zero)
                     }) {
                         pageModel.headerElements.forEach {
-                            render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
+                            try {
+                                render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
+                            } catch (e: Exception) {
+                            }
                         }
 
                         val bodyRect = pageModel.dimensions.bodyRect
-                        drawIntoCanvas { canvas ->
-                            canvas.nativeCanvas.save()
-                            canvas.nativeCanvas.clipRect(
-                                unitConverter.ptToPx(bodyRect.left),
-                                unitConverter.ptToPx(bodyRect.top),
-                                unitConverter.ptToPx(bodyRect.right),
-                                unitConverter.ptToPx(bodyRect.bottom)
-                            )
+                        val left = unitConverter.ptToPx(bodyRect.left)
+                        val top = unitConverter.ptToPx(bodyRect.top)
+                        val right = unitConverter.ptToPx(bodyRect.right)
+                        val bottom = unitConverter.ptToPx(bodyRect.bottom)
+                        clipRect(left, top, right, bottom) {
+                            pageModel.elements.forEach {
+                                try {
+                                    render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
+                                } catch (e: Exception) {
+                                    // Skip bad elements to prevent page crash
+                                }
+                            }
                         }
-                        pageModel.elements.forEach {
-                            render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
-                        }
-                        drawIntoCanvas { canvas -> canvas.nativeCanvas.restore() }
 
                         pageModel.footerElements.forEach {
-                            render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
+                            try {
+                                render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
+                            } catch (e: Exception) {
+                            }
                         }
                     }
                 }
@@ -126,13 +135,22 @@ fun PageView(
                         renderBlock(this)
                     }
                     if (isEditable) {
-                        EditablePrintOverlay(
+                        // Use new single-overlay approach (P0-2)
+                        EditableTextOverlay(
                             pageElements = pageModel.elements,
                             pageScale = displayScale,
                             unitConverter = unitConverter,
                             viewModel = viewModel
                         )
                     }
+                    Text(
+                        text = "Page ${pageModel.index + 1} of $pageCount",
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(PaddingValues(bottom = 8.dp)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isDarkMode) Color.White else Color.Black
+                    )
                 }
             }
         }
@@ -232,12 +250,3 @@ private fun EditableHeaderBlock(
         )
     )
 }
-
-private fun DocumentElement.Paragraph.toAnnotatedString(): androidx.compose.ui.text.AnnotatedString =
-    androidx.compose.ui.text.buildAnnotatedString {
-        listLabel?.let {
-            append(it)
-            append(" ")
-        }
-        spans.forEach { span -> append(span.text) }
-    }

@@ -132,7 +132,15 @@ fun EditorMoreMenu(
             leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) }
         )
         DropdownMenuItem(
-            text = { Text("Share & Export") },
+            text = { Text("Print / Save as PDF") },
+            onClick = { 
+                onShareExportClick()
+                onDismissRequest()
+            },
+            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
+        )
+        DropdownMenuItem(
+            text = { Text("Export as PDF") },
             onClick = { 
                 onShareExportClick()
                 onDismissRequest()

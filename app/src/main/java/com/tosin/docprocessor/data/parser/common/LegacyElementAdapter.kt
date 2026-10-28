@@ -40,29 +40,8 @@ class LegacyElementAdapter {
 
     fun adapt(document: ParsedDocument): List<DocumentElement> {
         val output = mutableListOf<DocumentElement>()
-        output += metadataElement(document)
-        document.comments.values.forEach { comment ->
-            output += DocumentElement.Comment(
-                info = CommentInfo(
-                    id = comment.id,
-                    author = comment.author,
-                    initials = comment.initials,
-                    date = comment.date,
-                    text = comment.text
-                )
-            )
-        }
-        document.notes.forEach { (noteId, noteBlock) ->
-            if (noteBlock is BlockNode.NoteBody) {
-                output += DocumentElement.Note(
-                    info = NoteInfo(
-                        kind = noteBlock.kind.toLegacy(),
-                        id = noteId,
-                        text = plainText(noteBlock.blocks)
-                    )
-                )
-            }
-        }
+        // Non-content elements (metadata/comments/notes/bookmarks/fields) are excluded from
+        // main print flow to avoid polluting page 1. They remain in ParsedDocument for diagnostics.
         output += blocks(document.blocks)
         document.headerFooters.forEach { story ->
             output += DocumentElement.HeaderFooter(
@@ -111,7 +90,8 @@ class LegacyElementAdapter {
             when (node) {
                 is BlockNode.Heading -> output += DocumentElement.SectionHeader(
                     text = inlineText(node.inlines),
-                    level = node.level
+                    level = node.level,
+                    style = paragraphStyle(node.style)
                 )
                 is BlockNode.Paragraph -> output += paragraphElements(node)
                 is BlockNode.ListBlock -> node.items.forEach { item ->
@@ -167,8 +147,91 @@ class LegacyElementAdapter {
     }
 
     private fun paragraphElements(node: BlockNode.Paragraph): List<DocumentElement> {
-        val spanResult = spans(node.inlines)
-        return listOf(paragraph(node, spanResult)) + spanResult.drawings
+        val pageBreakPositions = findPageBreakPositions(node.inlines)
+        if (pageBreakPositions.isEmpty()) {
+            val spanResult = spans(node.inlines)
+            return listOf(paragraph(node, spanResult)) + spanResult.drawings
+        }
+
+        val result = mutableListOf<DocumentElement>()
+        val segments = splitInlinesByPageBreaks(node.inlines, pageBreakPositions)
+        for ((index, segment) in segments.withIndex()) {
+            val spanResult = spans(segment)
+            val para = paragraph(node, spanResult)
+            // Keep listLabel only on first segment of the split paragraph
+            result += if (index == 0) {
+                para
+            } else if (para is DocumentElement.Paragraph) {
+                para.copy(listLabel = null)
+            } else {
+                para
+            }
+            result += spanResult.drawings
+            if (index < segments.size - 1) {
+                result += DocumentElement.PageBreak()
+            }
+        }
+        return result
+    }
+
+    private fun findPageBreakPositions(inlines: List<InlineNode>): List<Int> {
+        val positions = mutableListOf<Int>()
+        inlines.forEachIndexed { idx, inline ->
+            if (inline is InlineNode.Break && inline.kind == com.tosin.docprocessor.domain.document.model.BreakKind.PAGE) {
+                positions += idx
+            }
+            if (inline is InlineNode.Span) {
+                findPageBreakPositions(inline.children).forEach { _ -> positions += idx }
+            }
+            if (inline is InlineNode.Hyperlink) {
+                findPageBreakPositions(inline.children).forEach { _ -> positions += idx }
+            }
+        }
+        return positions.distinct()
+    }
+
+    private fun splitInlinesByPageBreaks(inlines: List<InlineNode>, positions: List<Int>): List<List<InlineNode>> {
+        if (positions.isEmpty()) return listOf(inlines)
+        val result = mutableListOf<List<InlineNode>>()
+        var current = mutableListOf<InlineNode>()
+        inlines.forEach { inline ->
+            if (inline is InlineNode.Break && inline.kind == com.tosin.docprocessor.domain.document.model.BreakKind.PAGE) {
+                result += current.toList()
+                current = mutableListOf()
+            } else {
+                current += inline
+            }
+        }
+        if (current.isNotEmpty() || result.isEmpty()) {
+            result += current.toList()
+        }
+        return result
+    }
+
+    private fun paragraphStyle(style: com.tosin.docprocessor.domain.document.model.style.ParagraphStyle): com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle {
+        return com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle(
+            styleId = style.styleId,
+            styleName = style.styleName,
+            alignment = style.alignment?.toLegacy() ?: ParagraphAlignment.START,
+            indentation = ParagraphIndentation(
+                left = style.indentationStartPoints?.times(20)?.toInt()?.takeIf { it > 0 },
+                right = style.indentationEndPoints?.times(20)?.toInt()?.takeIf { it > 0 },
+                firstLine = style.firstLineIndentPoints?.times(20)?.toInt()?.takeIf { it > 0 },
+                hanging = style.hangingIndentPoints?.times(20)?.toInt()?.takeIf { it > 0 }
+            ),
+            spacing = ParagraphSpacing(
+                before = style.spaceBeforePoints?.times(20)?.toInt()?.takeIf { it > 0 },
+                after = style.spaceAfterPoints?.times(20)?.toInt()?.takeIf { it > 0 },
+                line = style.toLegacySpacingLine()?.takeIf { it > 0 },
+                lineRule = style.toLegacySpacingRule()
+            ),
+            outlineLevel = style.outlineLevel,
+            isHeading = false,
+            headingLevel = null,
+            pageBreakBefore = style.pageBreakBefore == true,
+            keepWithNext = style.keepNext == true,
+            keepLinesTogether = style.keepLines == true
+        )
     }
 
     private fun paragraph(node: BlockNode.Paragraph, spanResult: SpanResult): DocumentElement {
@@ -181,26 +244,7 @@ class LegacyElementAdapter {
             id = node.anchor?.nativeId ?: UUID.randomUUID().toString(),
             spans = spanResult.spans,
             listLabel = node.listMarker?.text,
-            style = com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle(
-                styleId = style.styleId,
-                styleName = style.styleName,
-                alignment = style.alignment?.toLegacy() ?: ParagraphAlignment.START,
-                indentation = ParagraphIndentation(
-                    left = style.indentationStartPoints?.times(20)?.toInt(),
-                    right = style.indentationEndPoints?.times(20)?.toInt(),
-                    firstLine = style.firstLineIndentPoints?.times(20)?.toInt(),
-                    hanging = style.hangingIndentPoints?.times(20)?.toInt()
-                ),
-                spacing = ParagraphSpacing(
-                    before = style.spaceBeforePoints?.times(20)?.toInt(),
-                    after = style.spaceAfterPoints?.times(20)?.toInt(),
-                    line = style.toLegacySpacingLine(),
-                    lineRule = style.toLegacySpacingRule()
-                ),
-                outlineLevel = style.outlineLevel,
-                isHeading = false,
-                headingLevel = null
-            ),
+            style = paragraphStyle(style),
             hyperlink = hyperlink,
             listInfo = listInfo
         )
@@ -236,10 +280,18 @@ class LegacyElementAdapter {
                         if (hyperlink == null) hyperlink = link
                         walk(inline.children, link, textStyle)
                     }
-                    is InlineNode.Break -> spans += TextSpan(
-                        text = if (inline.kind == com.tosin.docprocessor.domain.document.model.BreakKind.LINE) "\n" else "",
-                        color = textStyle.color ?: "000000"
-                    )
+                    is InlineNode.Break -> when (inline.kind) {
+                        com.tosin.docprocessor.domain.document.model.BreakKind.LINE -> spans += TextSpan(
+                            text = "\n",
+                            color = textStyle.color ?: "000000"
+                        )
+                        com.tosin.docprocessor.domain.document.model.BreakKind.PAGE,
+                        com.tosin.docprocessor.domain.document.model.BreakKind.COLUMN,
+                        com.tosin.docprocessor.domain.document.model.BreakKind.SOFT_PAGE -> {
+                            // Page/column breaks are handled at paragraph level
+                        }
+                        else -> Unit
+                    }
                     is InlineNode.Tab -> spans += TextSpan(text = "\t")
                     is InlineNode.NoBreakHyphen -> spans += TextSpan(text = "\u2011")
                     is InlineNode.SoftHyphen -> spans += TextSpan(text = "\u00AD")
@@ -299,13 +351,19 @@ class LegacyElementAdapter {
                 caption = drawing.title
             )
         } else {
+            val widthPt = drawing.frameStyle.widthPoints
+            val heightPt = drawing.frameStyle.heightPoints
             DocumentElement.Drawing(
                 info = com.tosin.docprocessor.data.parser.internal.models.DrawingInfo(
                     kind = "drawing",
                     isInline = drawing.frameStyle.anchor ==
                         com.tosin.docprocessor.domain.document.model.style.FrameAnchor.INLINE,
+                    widthEmu = widthPt?.let { (it * 914400f / 72f).toLong() },
+                    heightEmu = heightPt?.let { (it * 914400f / 72f).toLong() },
                     altText = drawing.altText,
-                    title = drawing.title
+                    title = drawing.title,
+                    wrapStyle = drawing.frameStyle.wrapStyle,
+                    rotation = drawing.frameStyle.rotationDegrees?.toInt()
                 )
             )
         }
@@ -328,6 +386,8 @@ class LegacyElementAdapter {
         highlightColor = style.highlight,
         characterSpacing = style.letterSpacingPoints?.times(20)?.toInt(),
         language = style.language,
+        isSmallCaps = style.smallCaps == true,
+        isAllCaps = false,
         hyperlink = hyperlink
     )
 
@@ -349,10 +409,12 @@ class LegacyElementAdapter {
                 }
             }
         )
+        val gridColumnWidthsPt = node.gridColumns.mapNotNull { it?.toFloat() }
         return DocumentElement.Table(
             rows = rows,
             hasHeader = node.rows.firstOrNull()?.isHeader == true,
-            metadata = metadata
+            metadata = metadata,
+            gridColumnWidthsPt = gridColumnWidthsPt
         )
     }
 

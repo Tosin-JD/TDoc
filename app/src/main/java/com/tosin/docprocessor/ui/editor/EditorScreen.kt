@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Comment
@@ -36,6 +37,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -143,6 +145,12 @@ fun EditorScreen(
                         }
                     },
                     actions = {
+                        if (uiState.viewMode == ViewMode.PRINT) {
+                            PageCounterPill(
+                                currentPage = uiState.pageLayout.currentPage,
+                                pageCount = uiState.pageLayout.pageCount
+                            )
+                        }
                         IconButton(onClick = { /* TODO */ }) {
                             Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Comments")
                         }
@@ -171,6 +179,12 @@ fun EditorScreen(
                         }
                     },
                     actions = {
+                        if (uiState.viewMode == ViewMode.PRINT) {
+                            PageCounterPill(
+                                currentPage = uiState.pageLayout.currentPage,
+                                pageCount = uiState.pageLayout.pageCount
+                            )
+                        }
                         IconButton(onClick = { viewModel.undo() }) {
                             Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
                         }
@@ -234,8 +248,7 @@ fun EditorScreen(
                     ViewMode.PRINT -> PrintLayout(
                         viewModel = viewModel,
                         focusRequester = focusRequester,
-                        isEditable = uiState.editorMode == EditorMode.EDIT,
-                        isDarkMode = uiState.isDarkMode
+                        isEditable = uiState.editorMode == EditorMode.EDIT
                     )
                 }
 
@@ -284,6 +297,21 @@ fun EditorScreen(
             diagnostics = diagnostics,
             sheetState = diagnosticsSheetState,
             onDismiss = { showDiagnostics = false }
+        )
+    }
+}
+
+@Composable
+private fun PageCounterPill(currentPage: Int, pageCount: Int) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+    ) {
+        Text(
+            text = "$currentPage / $pageCount",
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
         )
     }
 }

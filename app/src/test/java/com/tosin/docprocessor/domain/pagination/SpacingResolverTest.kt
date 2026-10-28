@@ -20,4 +20,12 @@ class SpacingResolverTest {
         assertEquals(0f, resolved.afterPt, 0.01f)
         assertEquals(0f, resolved.lineSpacingPt, 0.01f)
     }
+
+    @Test
+    fun `negative spacing sentinels resolve to zero`() {
+        val resolved = resolver.resolve(ParagraphSpacing(before = -1, after = -1, line = -1))
+        assertEquals(0f, resolved.beforePt, 0.01f)
+        assertEquals(0f, resolved.afterPt, 0.01f)
+        assertEquals(0f, resolved.lineSpacingPt, 0.01f)
+    }
 }

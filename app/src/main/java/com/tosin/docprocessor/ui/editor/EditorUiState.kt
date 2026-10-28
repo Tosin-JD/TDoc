@@ -6,6 +6,7 @@ import com.tosin.docprocessor.domain.model.DocumentData
 import com.tosin.docprocessor.domain.model.EditorMode
 import com.tosin.docprocessor.domain.model.ViewMode
 import com.tosin.docprocessor.domain.document.model.OutlineEntry
+import com.tosin.docprocessor.domain.model.layout.PageLayoutState
 
 data class EditorUiState(
     val documentData: DocumentData? = null,
@@ -20,5 +21,6 @@ data class EditorUiState(
     val compatibility: CompatibilityLevel? = null,
     val diagnostics: DiagnosticsSummary = DiagnosticsSummary(),
     val outline: List<OutlineEntry> = emptyList(),
-    val protected: Boolean = false
+    val protected: Boolean = false,
+    val pageLayout: PageLayoutState = PageLayoutState()
 )

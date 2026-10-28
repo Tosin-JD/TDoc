@@ -11,11 +11,12 @@ import com.tosin.docprocessor.domain.model.DocumentData
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.EditorMode
 import com.tosin.docprocessor.domain.model.ViewMode
+import com.tosin.docprocessor.domain.model.layout.PageLayoutState
 import com.tosin.docprocessor.domain.document.DiagnosticsSummary
 import com.tosin.docprocessor.domain.document.ParseDiagnostic
 import com.tosin.docprocessor.data.local.dao.RecentFileDao
 import com.tosin.docprocessor.data.local.entities.RecentFile
-import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.ui.editor.renderer.AnnotatedStringMappers
 import com.tosin.docprocessor.data.repository.DocumentRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +61,17 @@ class EditorViewModel @Inject constructor(
 
     fun setViewMode(viewMode: ViewMode) {
         _uiState.value = _uiState.value.copy(viewMode = viewMode)
+    }
+
+    fun onPrintPageChanged(currentPage: Int, pageCount: Int) {
+        val safePageCount = pageCount.coerceAtLeast(1)
+        val pageLayout = PageLayoutState(
+            pageCount = safePageCount,
+            currentPage = currentPage.coerceIn(1, safePageCount)
+        )
+        if (_uiState.value.pageLayout != pageLayout) {
+            _uiState.value = _uiState.value.copy(pageLayout = pageLayout)
+        }
     }
 
     fun toggleEditorMode() {
@@ -147,11 +159,10 @@ class EditorViewModel @Inject constructor(
             val element = currentList[index]
             if (element is DocumentElement.Paragraph) {
                 currentList[index] = element.copy(
-                    spans = listOf(
-                        TextSpan(
-                            text = newContent.text,
-                            color = element.spans.firstOrNull()?.color ?: "000000"
-                        )
+                    spans = AnnotatedStringMappers.toTextSpans(
+                        annotatedString = newContent,
+                        originalSpans = element.spans,
+                        listLabel = element.listLabel
                     )
                 )
                 documentElements = currentList
@@ -190,13 +201,29 @@ class EditorViewModel @Inject constructor(
 
     fun saveCurrentFile() {
         val uri = currentUri ?: run {
-            viewModelScope.launch { _events.emit("No file to save. Open a file first.") }
+            viewModelScope.launch { _events.emit("No file to save. Use Save As first.") }
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _uiState.value = _uiState.value.copy(isSaving = true)
                 documentRepository.saveDocumentToUri(uri, documentElements)
+                syncDocumentState()
+                _events.emit("File saved successfully!")
+            } catch (e: Exception) {
+                _events.emit("Save failed: ${e.localizedMessage}")
+            } finally {
+                _uiState.value = _uiState.value.copy(isSaving = false)
+            }
+        }
+    }
+
+    fun saveDocumentToUri(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _uiState.value = _uiState.value.copy(isSaving = true)
+                documentRepository.saveDocumentToUri(uri, documentElements)
+                currentUri = uri
                 syncDocumentState()
                 _events.emit("File saved successfully!")
             } catch (e: Exception) {

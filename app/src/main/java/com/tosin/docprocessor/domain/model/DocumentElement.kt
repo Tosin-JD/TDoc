@@ -37,7 +37,8 @@ sealed class DocumentElement {
     data class SectionHeader(
         override val id: String = UUID.randomUUID().toString(),
         val text: String,
-        val level: Int = 1
+        val level: Int = 1,
+        val style: ParagraphStyle = ParagraphStyle()
     ) : DocumentElement()
 
     data class Section(

@@ -8,7 +8,10 @@ data class ParagraphStyle(
     val spacing: ParagraphSpacing = ParagraphSpacing(),
     val outlineLevel: Int? = null,
     val isHeading: Boolean = false,
-    val headingLevel: Int? = null
+    val headingLevel: Int? = null,
+    val pageBreakBefore: Boolean = false,
+    val keepWithNext: Boolean = false,
+    val keepLinesTogether: Boolean = false
 )
 
 enum class ParagraphAlignment {

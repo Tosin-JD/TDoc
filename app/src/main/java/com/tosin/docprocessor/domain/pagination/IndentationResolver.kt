@@ -21,10 +21,10 @@ class IndentationResolver {
         val listIndentPt = listInfo?.let { it.level.coerceAtLeast(0) * listIndentPerLevelPt } ?: 0f
 
         return ElementIndentation(
-            leftPt = (indentation.left?.let { twipsToPt(it) } ?: 0f) + listIndentPt,
-            rightPt = indentation.right?.let { twipsToPt(it) } ?: 0f,
-            firstLinePt = indentation.firstLine?.let { twipsToPt(it) } ?: 0f,
-            hangingPt = indentation.hanging?.let { twipsToPt(it) } ?: 0f
+            leftPt = (indentation.left?.coerceAtLeast(0)?.let { twipsToPt(it) } ?: 0f) + listIndentPt,
+            rightPt = indentation.right?.coerceAtLeast(0)?.let { twipsToPt(it) } ?: 0f,
+            firstLinePt = indentation.firstLine?.coerceAtLeast(0)?.let { twipsToPt(it) } ?: 0f,
+            hangingPt = indentation.hanging?.coerceAtLeast(0)?.let { twipsToPt(it) } ?: 0f
         )
     }
 }
