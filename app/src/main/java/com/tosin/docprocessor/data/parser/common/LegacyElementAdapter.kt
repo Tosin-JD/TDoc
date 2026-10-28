@@ -30,6 +30,8 @@ import com.tosin.docprocessor.domain.document.model.style.TextAlignment
 import com.tosin.docprocessor.domain.document.model.style.UnderlineKind
 import com.tosin.docprocessor.domain.document.model.style.VerticalAlign
 import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.document.model.style.TextStyle
+import com.tosin.docprocessor.data.parser.internal.models.RichTableCell
 import java.util.UUID
 
 /**
@@ -91,7 +93,8 @@ class LegacyElementAdapter {
                 is BlockNode.Heading -> output += DocumentElement.SectionHeader(
                     text = inlineText(node.inlines),
                     level = node.level,
-                    style = paragraphStyle(node.style)
+                    style = paragraphStyle(node.style),
+                    headingFontSizePoints = headingFontSizePoints(node.style)
                 )
                 is BlockNode.Paragraph -> output += paragraphElements(node)
                 is BlockNode.ListBlock -> node.items.forEach { item ->
@@ -124,7 +127,9 @@ class LegacyElementAdapter {
                             top = node.style.page.margins.topPoints?.times(20)?.toInt(),
                             right = node.style.page.margins.rightPoints?.times(20)?.toInt(),
                             bottom = node.style.page.margins.bottomPoints?.times(20)?.toInt(),
-                            left = node.style.page.margins.leftPoints?.times(20)?.toInt()
+                            left = node.style.page.margins.leftPoints?.times(20)?.toInt(),
+                            headerPoints = node.style.page.margins.headerPoints?.times(20)?.toInt(),
+                            footerPoints = node.style.page.margins.footerPoints?.times(20)?.toInt()
                         ),
                         columnCount = node.style.page.columns,
                         pageNumberStart = node.style.pageNumberStart,
@@ -144,6 +149,42 @@ class LegacyElementAdapter {
             }
         }
         return output
+    }
+
+    /** Converts a block-level content list into inline content, flattening
+     * paragraphs, headings, nested tables and text boxes into their inline
+     * children so the rich cell content can be turned into styled spans. */
+    private fun blockToInlines(nodes: List<BlockNode>): List<InlineNode> {
+        val inlines = mutableListOf<InlineNode>()
+        nodes.forEach { node ->
+            when (node) {
+                is BlockNode.Paragraph -> inlines += node.inlines
+                is BlockNode.Heading -> inlines += node.inlines
+                is BlockNode.ListItem -> inlines += blockToInlines(node.blocks)
+                is BlockNode.ListBlock -> node.items.forEach { item ->
+                    inlines += blockToInlines(item.blocks)
+                }
+                is BlockNode.Table -> node.rows.forEach { row ->
+                    row.cells.forEach { cell ->
+                        inlines += blockToInlines(cell.blocks)
+                    }
+                }
+                is BlockNode.TextBox -> inlines += blockToInlines(node.blocks)
+                is BlockNode.RevisionBlock -> inlines += blockToInlines(node.blocks)
+                is BlockNode.NoteBody -> inlines += blockToInlines(node.blocks)
+                is BlockNode.Figure -> node.caption.forEach { inlines += it }
+                is BlockNode.PageBreak, is BlockNode.IndexBlock, is BlockNode.Opaque -> Unit
+                else -> {
+                    // Preserve unknown block types as plain text so they do not
+                    // silently disappear from the rendered output.
+                    inlines += InlineNode.Text(
+                        text = " [${node::class.simpleName}] ",
+                        style = TextStyle()
+                    )
+                }
+            }
+        }
+        return inlines
     }
 
     private fun paragraphElements(node: BlockNode.Paragraph): List<DocumentElement> {
@@ -234,8 +275,13 @@ class LegacyElementAdapter {
         )
     }
 
+    /** Font size in points resolved from the rich model heading style, or null to
+     * fall back to the level-based heuristic. */
+    private fun headingFontSizePoints(style: com.tosin.docprocessor.domain.document.model.style.ParagraphStyle): Float? {
+        return style.defaultRunStyle?.fontSizePoints?.toFloat()
+    }
+
     private fun paragraph(node: BlockNode.Paragraph, spanResult: SpanResult): DocumentElement {
-        val style = node.style
         val listInfo = node.listMarker?.let {
             ListInfo(level = it.level, format = if (it.ordered) "decimal" else "bullet", levelText = it.text)
         }
@@ -244,11 +290,11 @@ class LegacyElementAdapter {
             id = node.anchor?.nativeId ?: UUID.randomUUID().toString(),
             spans = spanResult.spans,
             listLabel = node.listMarker?.text,
-            style = paragraphStyle(style),
+            style = paragraphStyle(node.style),
             hyperlink = hyperlink,
             listInfo = listInfo
         )
-    }
+        }
 
     private class SpanResult(
         val spans: List<TextSpan>,
@@ -392,26 +438,56 @@ class LegacyElementAdapter {
     )
 
     private fun table(node: BlockNode.Table): DocumentElement.Table {
-        val rows = node.rows.map { row ->
-            row.cells.map { cell -> plainText(cell.blocks) }
+        val tableRows = node.rows.map { row ->
+            val cells = row.cells.map { cell ->
+                val inlines = blockToInlines(cell.blocks)
+                val spanResult = spans(inlines)
+                DocumentElement.TableCell(
+                    rich = RichTableCell(
+                        spans = spanResult.spans,
+                        metadata = TableCellMetadata(
+                            gridSpan = cell.style.gridSpan,
+                            verticalMerge = cell.style.verticalMerge.name.lowercase(),
+                            shadingColor = cell.style.shading?.fill
+                        )
+                    ),
+                    metadata = TableCellMetadata(
+                        gridSpan = cell.style.gridSpan,
+                        verticalMerge = cell.style.verticalMerge.name.lowercase(),
+                        shadingColor = cell.style.shading?.fill,
+                        borderSummary = null
+                    )
+                )
+            }
+            DocumentElement.TableRow(
+                cells = cells,
+                heightPoints = row.heightPoints,
+                isHeader = row.isHeader
+            )
         }
         val metadata = TableMetadata(
             styleId = node.style.styleId,
             caption = node.style.caption,
             description = node.style.description,
+            shadingColor = node.style.shading?.fill,
+            borderSummary = null,
             rows = node.rows.map { row ->
                 row.cells.map { cell ->
                     TableCellMetadata(
                         gridSpan = cell.style.gridSpan,
                         verticalMerge = cell.style.verticalMerge.name.lowercase(),
-                        shadingColor = cell.style.shading?.fill
+                        shadingColor = cell.style.shading?.fill,
+                        borderSummary = null
                     )
                 }
             }
         )
         val gridColumnWidthsPt = node.gridColumns.mapNotNull { it?.toFloat() }
         return DocumentElement.Table(
-            rows = rows,
+            rows = emptyList(), // Use richRows for rich rendering; plain fallback via metadata
+            richRows = tableRows.map { row ->
+                row.cells.map { cell -> cell.rich }
+            },
             hasHeader = node.rows.firstOrNull()?.isHeader == true,
             metadata = metadata,
             gridColumnWidthsPt = gridColumnWidthsPt

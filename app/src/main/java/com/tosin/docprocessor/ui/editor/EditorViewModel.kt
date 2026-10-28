@@ -70,7 +70,11 @@ class EditorViewModel @Inject constructor(
             currentPage = currentPage.coerceIn(1, safePageCount)
         )
         if (_uiState.value.pageLayout != pageLayout) {
-            _uiState.value = _uiState.value.copy(pageLayout = pageLayout)
+            _uiState.value = _uiState.value.copy(
+                pageLayout = pageLayout,
+                pageCount = safePageCount,
+                currentPage = currentPage.coerceIn(1, safePageCount)
+            )
         }
     }
 

@@ -260,8 +260,10 @@ class OdtParser(
                 }
                 "<table:table>$rows</table:table>"
             }
+            is DocumentElement.TableRow -> "<table:table-row></table:table-row>"
+            is DocumentElement.TableCell -> "<table:table-cell office:value-type=\"string\"/>"
             is DocumentElement.Image -> "<text:p>${escapeXml(element.caption ?: element.altText ?: "[Image]")}</text:p>"
-            is DocumentElement.PageBreak -> "<text:p/>"
+            is DocumentElement.PageBreak -> "<text:p text:newline-kind=\"paragraph-end\"/>"
             is DocumentElement.Section -> "<text:p>${escapeXml(element.properties.toString())}</text:p>"
             is DocumentElement.HeaderFooter -> "<text:p>${escapeXml(element.content.text)}</text:p>"
             is DocumentElement.Note -> "<text:p>${escapeXml(element.info.text)}</text:p>"

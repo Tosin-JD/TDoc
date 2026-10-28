@@ -14,7 +14,10 @@ import com.tosin.docprocessor.domain.model.layout.TableCellLayout
 import com.tosin.docprocessor.domain.model.layout.TableRenderLayout
 import com.tosin.docprocessor.domain.model.layout.TableRowLayout
 import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind
+import com.tosin.docprocessor.data.parser.internal.models.RichTableCell
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata
+import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import kotlin.math.ceil
 
 class PrintPaginator(
@@ -677,9 +680,11 @@ class PrintPaginator(
     }
 
     private fun headingFontSizeFromStyle(element: DocumentElement.SectionHeader): Float {
-        val style = element.style
-        // Try to derive from common style properties if available; fallback to heuristic
-        return headingFontSize(element.level)
+        // Use the heading's own font size resolved from the document's heading
+        // style (passed through the legacy adapter), falling back to the level
+        // to heuristic.
+        val styleSize = element.headingFontSizePoints
+        return styleSize ?: headingFontSize(element.level)
     }
 
     private fun buildTableLayout(
@@ -705,17 +710,27 @@ class PrintPaginator(
         }
 
         val rowLayouts = element.rows.ifEmpty { listOf(emptyList()) }.mapIndexed { rowIndex, row ->
+            // Use richRows for rich content (styled spans); fall back to plain text rows
+            val richRow = element.richRows.getOrNull(rowIndex) ?: row.map { cell ->
+                RichTableCell(spans = listOf(TextSpan(text = cell.orEmpty())), metadata = TableCellMetadata())
+            }
             val cells = List(columnCount) { columnIndex ->
-                val text = row.getOrNull(columnIndex).orEmpty()
+                val plainText = row.getOrNull(columnIndex).orEmpty()
+                val cellRich = richRow.getOrNull(columnIndex) ?: RichTableCell(spans = listOf(TextSpan(text = plainText)), metadata = TableCellMetadata())
                 val cellWidthPt = columnWidthsPt[columnIndex]
                 val contentWidthPt = (cellWidthPt - (tableCellPaddingPt * 2f)).coerceAtLeast(20f)
-                val layout = textMeasurer.buildPlainTextLayout(
-                    text = text.ifEmpty { " " },
-                    fontSize = 9f,
-                    isBold = element.hasHeader && rowIndex == 0,
+                // Measure using rich spans (preserves authored font sizes, colors, etc.)
+                val layout = textMeasurer.buildParagraphLayout(
+                    spans = cellRich.spans,
+                    style = ParagraphStyle(), // Use empty style; spans carry their own formatting
                     widthPt = contentWidthPt,
+                    indentation = ElementIndentation(),
                     isDarkMode = isDarkMode
                 )
+                // Fallback: if measurement fails, use plain text with 9pt
+                val text = layout?.let { _ ->
+                    cellRich.spans.joinToString("") { it.text }
+                } ?: plainText.ifEmpty { " " }
 
                 TableCellLayout(
                     text = text,

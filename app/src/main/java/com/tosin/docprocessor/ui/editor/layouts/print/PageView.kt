@@ -27,8 +27,16 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextDecoration
+import com.tosin.docprocessor.core.color.DocumentColorTokens
+import com.tosin.docprocessor.core.color.DocumentTextColorResolver
 import com.tosin.docprocessor.core.rendering.PrintElementRenderer
+import com.tosin.docprocessor.domain.document.model.style.TextStyle
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.layout.PageModel
 import com.tosin.docprocessor.domain.model.layout.PositionedElement
@@ -158,39 +166,11 @@ fun PageView(
 }
 
 @Composable
-private fun EditablePrintOverlay(
-    pageElements: List<PositionedElement>,
-    pageScale: Float,
-    unitConverter: UnitConverter,
-    viewModel: EditorViewModel
-) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        pageElements.forEach { positionedElement ->
-            when (val element = positionedElement.element) {
-                is DocumentElement.Paragraph -> EditableParagraphBlock(
-                    positionedElement = positionedElement,
-                    pageScale = pageScale,
-                    unitConverter = unitConverter,
-                    onValueChange = { viewModel.updateParagraphById(positionedElement.elementId, it) }
-                )
-                is DocumentElement.SectionHeader -> EditableHeaderBlock(
-                    element = element,
-                    positionedElement = positionedElement,
-                    pageScale = pageScale,
-                    unitConverter = unitConverter,
-                    onValueChange = { viewModel.updateSectionHeaderById(positionedElement.elementId, it) }
-                )
-                else -> Unit
-            }
-        }
-    }
-}
-
-@Composable
 private fun EditableParagraphBlock(
     positionedElement: PositionedElement,
     pageScale: Float,
     unitConverter: UnitConverter,
+    darkMode: Boolean,
     onValueChange: (androidx.compose.ui.text.AnnotatedString) -> Unit
 ) {
     val paragraph = positionedElement.element as? DocumentElement.Paragraph ?: return
@@ -200,6 +180,36 @@ private fun EditableParagraphBlock(
     val widthDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.width()) * pageScale).toDp() }
     val heightDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.height()) * pageScale).toDp() }
 
+    // Build the TextField textStyle from the document's run style so the editing
+    // field matches the rendered text exactly (measure == draw). Font metrics are
+    // taken from the paragraph's spans (which carry fontSize, bold, italic,
+    // colour), while spacing/margins come from the paragraph style.
+    val paragraphStyle = paragraph.style
+    val sourceSpans = paragraph.spans
+    val baseFontSize = sourceSpans.firstOrNull { it.fontSize != null }?.fontSize ?: 12f
+    val hasBold = sourceSpans.any { it.isBold }
+    val hasItalic = sourceSpans.any { it.isItalic }
+    val hasUnderline = sourceSpans.any { it.isUnderline }
+    val baseStyle = MaterialTheme.typography.bodyMedium
+    val resolvedColor = DocumentTextColorResolver.resolveTextColor(
+        sourceSpans.firstOrNull { it.color.isNotEmpty() }?.color ?: "000000",
+        DocumentColorTokens.Light,
+        darkMode
+    )
+    val textColor = androidx.compose.ui.graphics.Color(
+        android.graphics.Color.red(resolvedColor) / 255f,
+        android.graphics.Color.green(resolvedColor) / 255f,
+        android.graphics.Color.blue(resolvedColor) / 255f,
+        android.graphics.Color.alpha(resolvedColor) / 255f
+    )
+    val textStyle = baseStyle.copy(
+        fontSize = baseFontSize.sp,
+        fontWeight = if (hasBold) FontWeight.Bold else baseStyle.fontWeight,
+        fontStyle = if (hasItalic) FontStyle.Italic else baseStyle.fontStyle,
+        color = textColor,
+        textDecoration = if (hasUnderline) TextDecoration.Underline else baseStyle.textDecoration
+    )
+
     TextField(
         value = androidx.compose.ui.text.input.TextFieldValue(paragraph.toAnnotatedString()),
         onValueChange = { onValueChange(it.annotatedString) },
@@ -207,7 +217,7 @@ private fun EditableParagraphBlock(
             .offset { IntOffset(xDp.roundToPx(), yDp.roundToPx()) }
             .width(widthDp)
             .height(heightDp),
-        textStyle = MaterialTheme.typography.bodyMedium,
+        textStyle = textStyle,
         colors = TextFieldDefaults.colors(
             focusedContainerColor = Color.White,
             unfocusedContainerColor = Color.White,

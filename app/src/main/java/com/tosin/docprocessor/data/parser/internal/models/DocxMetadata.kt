@@ -25,7 +25,11 @@ data class EdgeInsets(
     val top: Int? = null,
     val right: Int? = null,
     val bottom: Int? = null,
-    val left: Int? = null
+    val left: Int? = null,
+    /** Distance from page edge to header content (Word: `w:pgMar w:header`). */
+    val headerPoints: Int? = null,
+    /** Distance from page edge to footer content (Word: `w:pgMar w:footer`). */
+    val footerPoints: Int? = null
 )
 
 data class SectionProperties(
@@ -143,6 +147,8 @@ data class TableMetadata(
     val shadingColor: String? = null,
     val borderSummary: String? = null,
     val cellMargins: EdgeInsets = EdgeInsets(),
+    /** Explicit row heights resolved from `w:trHeight` (points). Null = auto height. */
+    val rowHeightPoints: Float? = null,
     val rows: List<List<TableCellMetadata>> = emptyList()
 )
 

@@ -688,6 +688,8 @@ class DocxParser(
             is DocumentElement.Paragraph -> renderParagraph(element)
             is DocumentElement.SectionHeader -> renderHeader(element)
             is DocumentElement.Table -> renderTable(element)
+            is DocumentElement.TableRow -> renderPlainParagraph("row")
+            is DocumentElement.TableCell -> renderPlainParagraph("cell")
             is DocumentElement.Image -> renderPlainParagraph(element.caption ?: element.altText ?: "[Image]")
             is DocumentElement.PageBreak -> "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>"
             is DocumentElement.Section -> renderPlainParagraph(element.properties.toString())

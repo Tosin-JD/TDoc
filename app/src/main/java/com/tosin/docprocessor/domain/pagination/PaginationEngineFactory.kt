@@ -77,6 +77,8 @@ fun DocumentElement.getTypeName(): String {
     return when (this) {
         is DocumentElement.Paragraph -> "Paragraph"
         is DocumentElement.Table -> "Table"
+        is DocumentElement.TableRow -> "TableRow"
+        is DocumentElement.TableCell -> "TableCell"
         is DocumentElement.Image -> "Image"
         is DocumentElement.SectionHeader -> "Section Header"
         is DocumentElement.Section -> "Section"

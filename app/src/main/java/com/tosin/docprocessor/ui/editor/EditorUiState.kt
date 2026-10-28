@@ -22,5 +22,14 @@ data class EditorUiState(
     val diagnostics: DiagnosticsSummary = DiagnosticsSummary(),
     val outline: List<OutlineEntry> = emptyList(),
     val protected: Boolean = false,
-    val pageLayout: PageLayoutState = PageLayoutState()
-)
+    val pageLayout: PageLayoutState = PageLayoutState(),
+    /** Direct page count for "Page x of Y" displays — mirrors `pageLayout.pageCount`. */
+    val pageCount: Int = 1,
+    /** Current page (1-based) for "Page x of Y" displays. */
+    val currentPage: Int = 1
+) {
+    init {
+        require(pageCount >= 1)
+        require(currentPage in 1..pageCount)
+    }
+}

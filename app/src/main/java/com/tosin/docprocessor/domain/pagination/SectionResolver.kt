@@ -20,7 +20,9 @@ class SectionResolver {
             marginLeft = section.margins.left?.let { twipsToPt(it) } ?: 72f,
             marginTop = section.margins.top?.let { twipsToPt(it) } ?: 72f,
             marginRight = section.margins.right?.let { twipsToPt(it) } ?: 72f,
-            marginBottom = section.margins.bottom?.let { twipsToPt(it) } ?: 72f
+            marginBottom = section.margins.bottom?.let { twipsToPt(it) } ?: 72f,
+            headerEdgePt = section.margins.headerPoints?.let { twipsToPt(it) } ?: 36f,
+            footerEdgePt = section.margins.footerPoints?.let { twipsToPt(it) } ?: 36f
         )
     }
 }
