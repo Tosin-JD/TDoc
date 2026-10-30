@@ -6,6 +6,8 @@ import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.layout.ElementIndentation
 import com.tosin.docprocessor.domain.model.layout.LayoutRect
 import com.tosin.docprocessor.domain.model.layout.LayoutResult
+import com.tosin.docprocessor.domain.model.DocumentElementMapper
+import com.tosin.docprocessor.domain.model.RenderableElement
 import com.tosin.docprocessor.domain.model.layout.PageDimensions
 import com.tosin.docprocessor.domain.model.layout.PageModel
 import com.tosin.docprocessor.domain.model.layout.PageState
@@ -14,7 +16,10 @@ import com.tosin.docprocessor.domain.model.layout.TableCellLayout
 import com.tosin.docprocessor.domain.model.layout.TableRenderLayout
 import com.tosin.docprocessor.domain.model.layout.TableRowLayout
 import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind
+import com.tosin.docprocessor.data.parser.internal.models.RichTableCell
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata
+import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import kotlin.math.ceil
 
 class PrintPaginator(
@@ -47,14 +52,8 @@ class PrintPaginator(
     override fun paginate(
         data: DocumentData,
         dimensions: PageDimensions,
-        startIndex: Int
-    ): List<PageModel> = paginate(data, dimensions, startIndex, isDarkMode = false)
-
-    fun paginate(
-        data: DocumentData,
-        dimensions: PageDimensions,
-        startIndex: Int = 0,
-        isDarkMode: Boolean = false
+        startIndex: Int,
+        isDarkMode: Boolean
     ): List<PageModel> {
         val headerFooterElements = data.content.filterIsInstance<DocumentElement.HeaderFooter>()
         val headers = headerFooterElements.filter { it.content.kind == HeaderFooterKind.HEADER }
@@ -64,7 +63,14 @@ class PrintPaginator(
 
         val elementsToProcess = data.content
             .drop(startIndex)
-            .filter { it !is DocumentElement.HeaderFooter }
+            .filterNot {
+                it is DocumentElement.HeaderFooter ||
+                    it is DocumentElement.Note ||
+                    it is DocumentElement.Comment ||
+                    it is DocumentElement.Bookmark ||
+                    it is DocumentElement.Field ||
+                    it is DocumentElement.Metadata
+            }
 
         measuredImageLayouts.clear()
 
@@ -177,14 +183,19 @@ class PrintPaginator(
         rect: LayoutRect,
         pageIndex: Int,
         isDarkMode: Boolean
-    ): PositionedElement {
-        val bounds = RectF(rect.left, rect.top, rect.right, rect.bottom)
-        return PositionedElement(
-            elementId = element.id,
-            element = element,
+    ): RenderableElement {
+        val bounds = RectF(
+            unitConverter.ptToPx(rect.left),
+            unitConverter.ptToPx(rect.top),
+            unitConverter.ptToPx(rect.right),
+            unitConverter.ptToPx(rect.bottom)
+        )
+        val textLayout = (buildTextLayoutResult(element.content.text, rect.width(), isDarkMode) as? LayoutResult.TextLayout)?.layout
+        return RenderableElement(
+            element = DocumentElementMapper.toDocumentBlock(element),
             pageIndex = pageIndex,
             bounds = bounds,
-            layoutResult = buildTextLayoutResult(element.content.text, rect.width(), isDarkMode)
+            layout = textLayout
         )
     }
 
@@ -203,6 +214,12 @@ class PrintPaginator(
                 state.currentY = dimensions.bodyTop
             }
             return
+        }
+
+        if (element is DocumentElement.Paragraph && element.style.pageBreakBefore) {
+            if (state.currentPageElements.isNotEmpty()) {
+                advanceToNextPage(state)
+            }
         }
 
         var pending: DocumentElement? = element
@@ -224,6 +241,7 @@ class PrintPaginator(
                 state.currentY += elementHeight
                 pending = null
             } else if (flowController.shouldNotSplit(currentElement) ||
+                (currentElement is DocumentElement.Paragraph && currentElement.style.keepWithNext) ||
                 (elementHeight <= dimensions.bodyHeight &&
                     flowController.shouldMoveToOwnPage(elementHeight, dimensions.bodyHeight))
             ) {
@@ -306,7 +324,7 @@ class PrintPaginator(
         val indent = indentationResolver.resolve(element.style.indentation, element.listInfo)
 
         val lastFittingLine = textMeasurer.getLastFittingLine(
-            element.spans,
+            element.renderSpans(),
             element.style,
             widthPt,
             availableHeightPt,
@@ -318,7 +336,7 @@ class PrintPaginator(
         }
 
         val fullLayout = textMeasurer.buildParagraphLayout(
-            spans = element.spans,
+            spans = element.renderSpans(),
             style = element.style,
             widthPt = widthPt,
             indentation = indent
@@ -330,9 +348,9 @@ class PrintPaginator(
         }
 
         val charAtLineEnd = textMeasurer.getLineEnd(fullLayout, adjustedLine)
-        val (spans1, spans2) = splitSpans(element.spans, charAtLineEnd)
-        val fragment1 = element.copy(spans = spans1).takeIf { it.spans.isNotEmpty() }
-        val fragment2 = element.copy(spans = spans2).takeIf { it.spans.isNotEmpty() }
+        val (spans1, spans2) = splitSpans(element.renderSpans(), charAtLineEnd)
+        val fragment1 = element.copy(spans = spans1, listLabel = null).takeIf { it.spans.isNotEmpty() }
+        val fragment2 = element.copy(spans = spans2, listLabel = null).takeIf { it.spans.isNotEmpty() }
         return Pair(fragment1, fragment2)
     }
 
@@ -408,14 +426,15 @@ class PrintPaginator(
     }
 
     private fun measureElement(element: DocumentElement, dimensions: PageDimensions): Float {
-        registry.get(element.id, element)?.let { return it }
+        val widthPt = dimensions.printableWidth
+        registry.get(element.id, element, widthPt)?.let { return it }
 
         val height = when (element) {
             is DocumentElement.Paragraph -> {
                 val indent = indentationResolver.resolve(element.style.indentation, element.listInfo)
                 val spacing = spacingResolver.resolve(element.style.spacing)
                 val textHeight = textMeasurer.measureParagraph(
-                    element.spans,
+                    element.renderSpans(),
                     element.style,
                     dimensions.printableWidth,
                     indent
@@ -423,9 +442,12 @@ class PrintPaginator(
                 spacing.beforePt + textHeight + spacing.afterPt
             }
             is DocumentElement.SectionHeader -> {
+                val headingSize = element.style.spacing.line?.let { it / 20f }
+                    ?: element.style.indentation.left?.let { null } // not used
+                    ?: headingFontSizeFromStyle(element)
                 textMeasurer.measurePlainText(
                     element.text,
-                    fontSize = (12 + (4 - element.level)).toFloat(),
+                    fontSize = headingSize,
                     isBold = true,
                     widthPt = dimensions.printableWidth
                 )
@@ -440,7 +462,7 @@ class PrintPaginator(
             else -> 10f
         }
 
-        registry.put(element.id, element, height)
+        registry.put(element.id, element, height, widthPt)
         return height
     }
 
@@ -521,10 +543,13 @@ class PrintPaginator(
                 indentationResolver.resolve(element.style.indentation, element.listInfo)
             else -> ElementIndentation()
         }
+        val paragraphSpacingBefore = (element as? DocumentElement.Paragraph)
+            ?.let { spacingResolver.resolve(it.style.spacing).beforePt }
+            ?: 0f
 
         val bounds = RectF(
             dimensions.marginLeft + indent.leftPt,
-            yPositionPt,
+            yPositionPt + paragraphSpacingBefore,
             dimensions.marginLeft + dimensions.printableWidth - indent.rightPt,
             yPositionPt + elementHeight
         )
@@ -551,14 +576,20 @@ class PrintPaginator(
         val widthPt = dimensions.printableWidth
         return when (element) {
             is DocumentElement.Paragraph ->
-                textMeasurer.buildParagraphLayout(element.spans, element.style, widthPt, indentation, isDarkMode)
+                textMeasurer.buildParagraphLayout(
+                    element.renderSpans(),
+                    element.style,
+                    widthPt,
+                    indentation,
+                    isDarkMode
+                )
                     ?.let { LayoutResult.TextLayout(it) }
                     ?: LayoutResult.Empty
 
             is DocumentElement.SectionHeader ->
                 textMeasurer.buildPlainTextLayout(
                     text = element.text,
-                    fontSize = (12 + (4 - element.level)).toFloat(),
+                    fontSize = headingFontSizeFromStyle(element),
                     isBold = true,
                     widthPt = widthPt,
                     isDarkMode = isDarkMode
@@ -643,6 +674,21 @@ class PrintPaginator(
         return layout?.let { LayoutResult.TextLayout(it) } ?: LayoutResult.Empty
     }
 
+    private fun headingFontSize(level: Int): Float = when (level) {
+        1 -> 16f
+        2 -> 13f
+        3 -> 12f
+        else -> 11f
+    }
+
+    private fun headingFontSizeFromStyle(element: DocumentElement.SectionHeader): Float {
+        // Use the heading's own font size resolved from the document's heading
+        // style (passed through the legacy adapter), falling back to the level
+        // to heuristic.
+        val styleSize = element.headingFontSizePoints
+        return styleSize ?: headingFontSize(element.level)
+    }
+
     private fun buildTableLayout(
         element: DocumentElement.Table,
         widthPt: Float,
@@ -653,20 +699,40 @@ class PrintPaginator(
             .coerceAtLeast(minTableColumnWidthPt)
 
         val columnCount = element.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
-        val columnWidthsPt = calculateColumnWidths(element.rows, effectiveWidth, columnCount)
+        val columnWidthsPt = if (element.gridColumnWidthsPt.isNotEmpty() && element.gridColumnWidthsPt.size == columnCount) {
+            val gridSum = element.gridColumnWidthsPt.sum()
+            if (gridSum > 0f) {
+                val scale = effectiveWidth / gridSum
+                element.gridColumnWidthsPt.map { (it * scale).coerceAtLeast(minTableColumnWidthPt) }
+            } else {
+                calculateColumnWidths(element.rows, effectiveWidth, columnCount)
+            }
+        } else {
+            calculateColumnWidths(element.rows, effectiveWidth, columnCount)
+        }
 
         val rowLayouts = element.rows.ifEmpty { listOf(emptyList()) }.mapIndexed { rowIndex, row ->
+            // Use richRows for rich content (styled spans); fall back to plain text rows
+            val richRow = element.richRows.getOrNull(rowIndex) ?: row.map { cell ->
+                RichTableCell(spans = listOf(TextSpan(text = cell.orEmpty())), metadata = TableCellMetadata())
+            }
             val cells = List(columnCount) { columnIndex ->
-                val text = row.getOrNull(columnIndex).orEmpty()
+                val plainText = row.getOrNull(columnIndex).orEmpty()
+                val cellRich = richRow.getOrNull(columnIndex) ?: RichTableCell(spans = listOf(TextSpan(text = plainText)), metadata = TableCellMetadata())
                 val cellWidthPt = columnWidthsPt[columnIndex]
                 val contentWidthPt = (cellWidthPt - (tableCellPaddingPt * 2f)).coerceAtLeast(20f)
-                val layout = textMeasurer.buildPlainTextLayout(
-                    text = text.ifEmpty { " " },
-                    fontSize = 9f,
-                    isBold = element.hasHeader && rowIndex == 0,
+                // Measure using rich spans (preserves authored font sizes, colors, etc.)
+                val layout = textMeasurer.buildParagraphLayout(
+                    spans = cellRich.spans,
+                    style = ParagraphStyle(), // Use empty style; spans carry their own formatting
                     widthPt = contentWidthPt,
+                    indentation = ElementIndentation(),
                     isDarkMode = isDarkMode
                 )
+                // Fallback: if measurement fails, use plain text with 9pt
+                val text = layout?.let { _ ->
+                    cellRich.spans.joinToString("") { it.text }
+                } ?: plainText.ifEmpty { " " }
 
                 TableCellLayout(
                     text = text,
@@ -739,10 +805,24 @@ class PrintPaginator(
         elements: List<PositionedElement>,
         dimensions: PageDimensions
     ): PageModel {
+        val renderableElements = elements.map { positioned ->
+            RenderableElement(
+                element = DocumentElementMapper.toDocumentBlock(positioned.element),
+                pageIndex = positioned.pageIndex,
+                bounds = RectF(
+                    unitConverter.ptToPx(positioned.bounds.left),
+                    unitConverter.ptToPx(positioned.bounds.top),
+                    unitConverter.ptToPx(positioned.bounds.right),
+                    unitConverter.ptToPx(positioned.bounds.bottom)
+                ),
+                indentation = positioned.indentation,
+                layout = (positioned.layoutResult as? LayoutResult.TextLayout)?.layout
+            )
+        }
         return PageModel(
             index = index,
             dimensions = dimensions,
-            elements = elements,
+            elements = renderableElements,
             state = PageState.CLEAN
         )
     }
@@ -804,4 +884,7 @@ class PrintPaginator(
         registry.clear()
         textMeasurer.clearCache()
     }
+
+    private fun DocumentElement.Paragraph.renderSpans(): List<TextSpan> =
+        listLabel?.let { listOf(TextSpan(text = "$it ")) + spans } ?: spans
 }

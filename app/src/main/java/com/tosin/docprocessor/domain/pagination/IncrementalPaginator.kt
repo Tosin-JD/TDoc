@@ -41,6 +41,7 @@ class IncrementalPaginator(
      * @param newData The updated document data
      * @param dimensions Page dimensions
      * @param changedElementIndex Index of the changed element in newData
+     * @param isDarkMode Whether dark mode is active (affects header/footer rendering)
      * @return Updated page list (minimal re-calculation)
      */
     fun incrementalUpdate(
@@ -48,21 +49,29 @@ class IncrementalPaginator(
         previousData: DocumentData,
         newData: DocumentData,
         dimensions: PageDimensions,
-        changedElementIndex: Int
+        changedElementIndex: Int,
+        isDarkMode: Boolean = false
     ): List<PageModel> {
         if (changedElementIndex < 0 || changedElementIndex >= newData.content.size) {
             // Index out of range; do a full re-pagination
-            return printPaginator.paginate(newData, dimensions)
+            return printPaginator.paginate(newData, dimensions, isDarkMode = isDarkMode)
         }
 
         val changedElement = newData.content[changedElementIndex]
         val previousElement = previousData.content.getOrNull(changedElementIndex)
 
         // Step 1: Check if height actually changed
-        val previousHeight = previousElement?.let { registry.get(it.id, it) }
-        val newHeight = registry.get(changedElement.id, changedElement) ?: run {
+        // Force re-measurement of the changed element to guarantee cache
+        // coherency: edits invalidate the cached measurement so the paginator
+        // always sees the latest content height rather than a stale entry
+        // keyed by the unchanged element id.
+        registry.invalidate(changedElement.id)
+
+        val widthPt = dimensions.printableWidth
+        val previousHeight = previousElement?.let { registry.get(it.id, it, widthPt) }
+        val newHeight = registry.get(changedElement.id, changedElement, widthPt) ?: run {
             val measured = measureElement(changedElement, dimensions)
-            registry.put(changedElement.id, changedElement, measured)
+            registry.put(changedElement.id, changedElement, measured, widthPt)
             measured
         }
 
@@ -73,14 +82,14 @@ class IncrementalPaginator(
 
         // Step 2: Find the page where the changed element is located
         val affectedPageIndex = findPageContainingElement(previousPages, changedElement.id)
-            ?: return printPaginator.paginate(newData, dimensions)
+            ?: return printPaginator.paginate(newData, dimensions, isDarkMode = isDarkMode)
 
         // Step 3: Re-paginate from affected page onwards
         // But first, gather pages before the affected page (they're unchanged)
         val unchangedPages = previousPages.take(affectedPageIndex)
 
         // Re-paginate from the changed element onwards
-        val repaginatedPages = printPaginator.paginate(newData, dimensions, changedElementIndex)
+        val repaginatedPages = printPaginator.paginate(newData, dimensions, changedElementIndex, isDarkMode = isDarkMode)
 
         // Step 4: Find the settlement point (where the ripple ends)
         val settledPageIndex = findSettlementPoint(
@@ -96,15 +105,22 @@ class IncrementalPaginator(
         // - Unchanged pages after settlement point (renumbered)
         val result = mutableListOf<PageModel>()
         result.addAll(unchangedPages)
-        result.addAll(repaginatedPages.take(settledPageIndex - affectedPageIndex + 1))
+        val newPagesToTake = repaginatedPages.take(settledPageIndex - affectedPageIndex + 1)
+        result.addAll(newPagesToTake)
 
-        // Renumber remaining pages if needed
+        // Renumber remaining pages if needed and update their element pageIndexes
         if (settledPageIndex + 1 < previousPages.size) {
             val pageCountDifference = (result.size - 1) - settledPageIndex
             for (i in settledPageIndex + 1 until previousPages.size) {
                 val page = previousPages[i]
+                val newPageIndex = page.index + pageCountDifference
                 result.add(
-                    page.copy(index = page.index + pageCountDifference)
+                    page.copy(
+                        index = newPageIndex,
+                        elements = page.elements.map { it.copy(pageIndex = newPageIndex) },
+                        headerElements = page.headerElements.map { it.copy(pageIndex = newPageIndex) },
+                        footerElements = page.footerElements.map { it.copy(pageIndex = newPageIndex) }
+                    )
                 )
             }
         }
@@ -230,10 +246,11 @@ class IncrementalPaginator(
     override fun paginate(
         data: DocumentData,
         dimensions: PageDimensions,
-        startIndex: Int
+        startIndex: Int,
+        isDarkMode: Boolean
     ): List<PageModel> {
         // For full pagination, delegate to PrintPaginator
-        return printPaginator.paginate(data, dimensions, startIndex)
+        return printPaginator.paginate(data, dimensions, startIndex, isDarkMode)
     }
 
     override fun estimatePageCount(

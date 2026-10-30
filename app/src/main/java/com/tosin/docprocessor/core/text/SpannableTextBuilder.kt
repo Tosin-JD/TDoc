@@ -41,7 +41,12 @@ object SpannableTextBuilder {
         val builder = SpannableStringBuilder()
         spans.forEach { span ->
             val start = builder.length
-            builder.append(span.text)
+            val displayText = when {
+                span.isAllCaps -> span.text.uppercase()
+                span.isSmallCaps -> span.text.uppercase()
+                else -> span.text
+            }
+            builder.append(displayText)
             val end = builder.length
             if (start == end) return@forEach
 

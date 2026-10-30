@@ -1,10 +1,17 @@
 package com.tosin.docprocessor.ui.editor.renderer
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Icon
@@ -13,23 +20,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.ParagraphStyle
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
@@ -170,8 +170,100 @@ fun DocumentElementRenderer(
         is DocumentElement.PageBreak -> {
             Text(text = "", modifier = Modifier.padding(vertical = 12.dp))
         }
+
+        is DocumentElement.TableRow -> {
+            TableRowWidget(rows = listOf(element), isDarkMode = isDarkMode)
+        }
+
+        is DocumentElement.TableCell -> {
+            UnsupportedPlaceholder(
+                kind = "TableCell",
+                description = "Cells are only rendered as part of a TableRow.",
+                isDarkMode = isDarkMode
+            )
+        }
+
+        else -> MetadataText("unhandled: ${element::class.simpleName}", isDarkMode)
     }
 }
+
+@Composable
+private fun TableRowWidget(
+    rows: List<DocumentElement.TableRow>,
+    isDarkMode: Boolean
+) {
+    rows.forEachIndexed { rowIndex, row ->
+        TableRowView(
+            row = DocumentElement.TableRow(
+                cells = row.cells.map { cell ->
+                    DocumentElement.TableCell(
+                        rich = cell.rich,
+                        metadata = cell.metadata
+                    )
+                },
+                heightPoints = row.heightPoints,
+                isHeader = row.isHeader && rowIndex == 0
+            ),
+            columnWidthsDp = List(row.cells.size) { 100f },
+            rowIndex = rowIndex,
+            isDarkMode = isDarkMode
+        )
+    }
+}
+
+@Composable
+private fun TableRowView(
+    row: DocumentElement.TableRow,
+    columnWidthsDp: List<Float>,
+    rowIndex: Int,
+    isDarkMode: Boolean
+) {
+    val background = when {
+        row.isHeader -> Color(if (isDarkMode) 0xFF202124 else 0xFFE4E4E4)
+        else -> Color.Transparent
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(background)
+            .height(IntrinsicSize.Min)
+    ) {
+        row.cells.forEachIndexed { cellIndex, cell ->
+            Box(
+                modifier = Modifier
+                    .width(columnWidthsDp.getOrElse(cellIndex) { 100f }.dp)
+                    .padding(
+                        horizontal = 4.dp,
+                        vertical = 2.dp
+                    ),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                val richText = cell.rich.spans.joinToString(" ") { it.text }
+                Text(
+                    text = richText.ifBlank { " " },
+                    style = if (row.isHeader) MaterialTheme.typography.titleSmall
+                    else MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (row.isHeader) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (row.isHeader) Color(if (isDarkMode) 0xFFE0E0E0 else 0xFF333333)
+                    else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (cellIndex != row.cells.lastIndex) {
+                VerticalDivider(
+                    modifier = Modifier.fillMaxHeight(),
+                    thickness = 1.dp,
+                    color = Color.Gray
+                )
+            }
+        }
+    }
+}
+
+/** Renders a single table row as a grid of cell widgets. */
 
 /**
  * Neutral, non-alarming surface shown for constructs the renderer cannot draw.

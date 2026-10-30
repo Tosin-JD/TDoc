@@ -28,4 +28,15 @@ class IndentationResolverTest {
         val indent = resolver.resolve(ParagraphIndentation(firstLine = 360))
         assertEquals(18f, indent.firstLinePt, 0.01f)
     }
+
+    @Test
+    fun `negative indentation sentinels resolve to zero`() {
+        val indent = resolver.resolve(
+            ParagraphIndentation(left = -1, right = -1, firstLine = -1, hanging = -1)
+        )
+        assertEquals(0f, indent.leftPt, 0.01f)
+        assertEquals(0f, indent.rightPt, 0.01f)
+        assertEquals(0f, indent.firstLinePt, 0.01f)
+        assertEquals(0f, indent.hangingPt, 0.01f)
+    }
 }

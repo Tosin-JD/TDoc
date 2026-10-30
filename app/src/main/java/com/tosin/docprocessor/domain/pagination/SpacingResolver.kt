@@ -19,9 +19,9 @@ class SpacingResolver {
 
     fun resolve(spacing: ParagraphSpacing): ResolvedSpacing {
         return ResolvedSpacing(
-            beforePt = spacing.before?.let { twipsToPt(it) } ?: 0f,
-            afterPt = spacing.after?.let { twipsToPt(it) } ?: 0f,
-            lineSpacingPt = spacing.line?.let { twipsToPt(it) } ?: 0f
+            beforePt = spacing.before?.coerceAtLeast(0)?.let { twipsToPt(it) } ?: 0f,
+            afterPt = spacing.after?.coerceAtLeast(0)?.let { twipsToPt(it) } ?: 0f,
+            lineSpacingPt = spacing.line?.coerceAtLeast(0)?.let { twipsToPt(it) } ?: 0f
         )
     }
 }

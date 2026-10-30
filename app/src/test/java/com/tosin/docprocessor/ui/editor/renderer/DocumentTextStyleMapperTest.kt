@@ -1,10 +1,13 @@
 package com.tosin.docprocessor.ui.editor.renderer
 
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.withStyle
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphIndentation
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphSpacing
@@ -63,7 +66,7 @@ class DocumentTextStyleMapperTest {
     @Test
     fun `line height is raised so the tallest run is never clipped`() {
         val model = mapper.map(
-            paragraph(spans = listOf(TextSpan("big", fontSize = 32))),
+            paragraph(spans = listOf(TextSpan("big", fontSize = 32f))),
             baseStyle,
             isDarkMode = false
         )
@@ -82,5 +85,22 @@ class DocumentTextStyleMapperTest {
         )
         assertEquals("1. Bold lead-in", model.text.text)
         assertTrue(model.text.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+    }
+
+    @Test
+    fun `annotated string mapping preserves run font size and emphasis`() {
+        val source = listOf(TextSpan("hello", fontSize = 11f))
+        val edited = buildAnnotatedString {
+            withStyle(SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold)) {
+                append("world")
+            }
+        }
+
+        val spans = AnnotatedStringMappers.toTextSpans(edited, source)
+
+        assertEquals(1, spans.size)
+        assertEquals("world", spans.single().text)
+        assertEquals(18f, spans.single().fontSize)
+        assertTrue(spans.single().isBold)
     }
 }

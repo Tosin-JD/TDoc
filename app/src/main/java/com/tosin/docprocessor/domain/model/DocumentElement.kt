@@ -15,6 +15,26 @@ sealed class DocumentElement {
         val listInfo: ListInfo? = null
     ) : DocumentElement()
 
+    /** Wrapper for a rendered table row. */
+    data class TableRow(
+        override val id: String = UUID.randomUUID().toString(),
+        val cells: List<TableCell>,
+        val heightPoints: Double? = null,
+        val isHeader: Boolean = false
+    ) : DocumentElement()
+
+    /** Wrapper for a rendered table cell carrying rich content and cell metadata. */
+    data class TableCell(
+        override val id: String = UUID.randomUUID().toString(),
+        val rich: com.tosin.docprocessor.data.parser.internal.models.RichTableCell = com.tosin.docprocessor.data.parser.internal.models.RichTableCell(
+            spans = emptyList(),
+            metadata = com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata()
+        ),
+        val metadata: com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata = com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata()
+    ) : DocumentElement()
+
+    /** Table carrying rich per-cell content, column grid widths, and document metadata.
+     *  Populated by [LegacyElementAdapter]. */
     data class Table(
         override val id: String = UUID.randomUUID().toString(),
         val rows: List<List<String>>,
@@ -37,7 +57,11 @@ sealed class DocumentElement {
     data class SectionHeader(
         override val id: String = UUID.randomUUID().toString(),
         val text: String,
-        val level: Int = 1
+        val level: Int = 1,
+        val style: ParagraphStyle = ParagraphStyle(),
+        /** Font size (in points) resolved from the document's heading style, or null
+         * to fall back to the level-based heuristic. */
+        val headingFontSizePoints: Float? = null
     ) : DocumentElement()
 
     data class Section(

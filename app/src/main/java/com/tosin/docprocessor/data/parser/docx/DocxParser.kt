@@ -15,6 +15,7 @@ import com.tosin.docprocessor.data.parser.internal.models.NoteInfo
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphIndentation
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphSpacing
+import com.tosin.docprocessor.data.parser.internal.models.LineSpacingRule
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import com.tosin.docprocessor.data.parser.internal.models.SectionProperties
 import com.tosin.docprocessor.data.parser.internal.models.EdgeInsets
@@ -525,15 +526,16 @@ class DocxParser(
                     styleName = name,
                     alignment = parseAlignment(paragraphProperties?.firstChild("jc")?.attribute("val")),
                     indentation = ParagraphIndentation(
-                        left = paragraphProperties?.firstChild("ind")?.attribute("left")?.toIntOrNull(),
-                        right = paragraphProperties?.firstChild("ind")?.attribute("right")?.toIntOrNull(),
-                        firstLine = paragraphProperties?.firstChild("ind")?.attribute("firstLine")?.toIntOrNull(),
-                        hanging = paragraphProperties?.firstChild("ind")?.attribute("hanging")?.toIntOrNull()
+                        left = paragraphProperties?.firstChild("ind")?.attribute("left")?.toIntOrNull()?.takeIf { it > 0 },
+                        right = paragraphProperties?.firstChild("ind")?.attribute("right")?.toIntOrNull()?.takeIf { it > 0 },
+                        firstLine = paragraphProperties?.firstChild("ind")?.attribute("firstLine")?.toIntOrNull()?.takeIf { it > 0 },
+                        hanging = paragraphProperties?.firstChild("ind")?.attribute("hanging")?.toIntOrNull()?.takeIf { it > 0 }
                     ),
                     spacing = ParagraphSpacing(
-                        before = paragraphProperties?.firstChild("spacing")?.attribute("before")?.toIntOrNull(),
-                        after = paragraphProperties?.firstChild("spacing")?.attribute("after")?.toIntOrNull(),
-                        line = paragraphProperties?.firstChild("spacing")?.attribute("line")?.toIntOrNull()
+                        before = paragraphProperties?.firstChild("spacing")?.attribute("before")?.toIntOrNull()?.takeIf { it > 0 },
+                        after = paragraphProperties?.firstChild("spacing")?.attribute("after")?.toIntOrNull()?.takeIf { it > 0 },
+                        line = paragraphProperties?.firstChild("spacing")?.attribute("line")?.toIntOrNull()?.takeIf { it > 0 },
+                        lineRule = parseLineSpacingRule(paragraphProperties?.firstChild("spacing")?.attribute("lineRule"))
                     ),
                     outlineLevel = headingLevel?.minus(1),
                     isHeading = headingLevel != null,
@@ -552,6 +554,8 @@ class DocxParser(
         val baseStyle = styles[styleId] ?: ParagraphStyle(styleId = styleId)
         val directAlignment = parseAlignment(properties?.firstChild("jc")?.attribute("val"))
         val directHeadingLevel = properties?.firstChild("outlineLvl")?.attribute("val")?.toIntOrNull()?.plus(1)
+        val directIndentation = properties?.firstChild("ind")
+        val directSpacing = properties?.firstChild("spacing")
 
         return baseStyle.copy(
             alignment = if (directAlignment != ParagraphAlignment.START || baseStyle.alignment == ParagraphAlignment.START) {
@@ -559,9 +563,38 @@ class DocxParser(
             } else {
                 baseStyle.alignment
             },
+            indentation = baseStyle.indentation.copy(
+                left = directIndentation?.attribute("left")?.toIntOrNull()?.takeIf { it > 0 }
+                    ?: directIndentation?.attribute("start")?.toIntOrNull()?.takeIf { it > 0 }
+                    ?: baseStyle.indentation.left,
+                right = directIndentation?.attribute("right")?.toIntOrNull()?.takeIf { it > 0 }
+                    ?: directIndentation?.attribute("end")?.toIntOrNull()?.takeIf { it > 0 }
+                    ?: baseStyle.indentation.right,
+                firstLine = directIndentation?.attribute("firstLine")?.toIntOrNull()?.takeIf { it > 0 }
+                    ?: baseStyle.indentation.firstLine,
+                hanging = directIndentation?.attribute("hanging")?.toIntOrNull()?.takeIf { it > 0 }
+                    ?: baseStyle.indentation.hanging
+            ),
+            spacing = baseStyle.spacing.copy(
+                before = directSpacing?.attribute("before")?.toIntOrNull()?.takeIf { it > 0 }
+                    ?: baseStyle.spacing.before,
+                after = directSpacing?.attribute("after")?.toIntOrNull()?.takeIf { it > 0 }
+                    ?: baseStyle.spacing.after,
+                line = directSpacing?.attribute("line")?.toIntOrNull()?.takeIf { it > 0 }
+                    ?: baseStyle.spacing.line,
+                lineRule = parseLineSpacingRule(directSpacing?.attribute("lineRule"))
+                    ?: baseStyle.spacing.lineRule
+            ),
             headingLevel = directHeadingLevel ?: baseStyle.headingLevel,
             isHeading = directHeadingLevel != null || baseStyle.isHeading
         )
+    }
+
+    private fun parseLineSpacingRule(value: String?): LineSpacingRule? = when (value?.lowercase()) {
+        "auto" -> LineSpacingRule.AUTO
+        "exact" -> LineSpacingRule.EXACT
+        "atleast" -> LineSpacingRule.AT_LEAST
+        else -> null
     }
 
     private fun extractHeadingLevel(styleId: String?, styleName: String?): Int? {
@@ -655,6 +688,8 @@ class DocxParser(
             is DocumentElement.Paragraph -> renderParagraph(element)
             is DocumentElement.SectionHeader -> renderHeader(element)
             is DocumentElement.Table -> renderTable(element)
+            is DocumentElement.TableRow -> renderPlainParagraph("row")
+            is DocumentElement.TableCell -> renderPlainParagraph("cell")
             is DocumentElement.Image -> renderPlainParagraph(element.caption ?: element.altText ?: "[Image]")
             is DocumentElement.PageBreak -> "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>"
             is DocumentElement.Section -> renderPlainParagraph(element.properties.toString())

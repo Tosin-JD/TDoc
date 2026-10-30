@@ -184,8 +184,11 @@ class DocumentRepositoryImpl @Inject constructor(
                 is DocumentElement.Drawing -> element.info.kind
                 is DocumentElement.EmbeddedObject -> element.info.description ?: element.info.kind
                 is DocumentElement.Table -> element.rows.joinToString("\n") { row -> row.joinToString("\t") }
+                is DocumentElement.TableRow -> ""
+                is DocumentElement.TableCell -> ""
                 is DocumentElement.Image -> element.caption ?: element.altText.orEmpty()
                 is DocumentElement.PageBreak -> ""
+                else -> ""
             }
         }
 }

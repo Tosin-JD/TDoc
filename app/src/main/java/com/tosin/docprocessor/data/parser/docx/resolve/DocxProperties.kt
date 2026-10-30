@@ -98,15 +98,17 @@ object DocxParagraphProperties {
             styleId = pStyle,
             alignment = alignment(pPr.wFirst("jc")?.wAttr("val")),
             indentationStartPoints = Units.twipsToPoints(
-                ind?.wAttr("start")?.toIntOrNull() ?: ind?.wAttr("left")?.toIntOrNull()
+                (ind?.wAttr("start")?.toIntOrNull() ?: ind?.wAttr("left")?.toIntOrNull())
+                    ?.takeIf { it > 0 }
             ),
             indentationEndPoints = Units.twipsToPoints(
-                ind?.wAttr("end")?.toIntOrNull() ?: ind?.wAttr("right")?.toIntOrNull()
+                (ind?.wAttr("end")?.toIntOrNull() ?: ind?.wAttr("right")?.toIntOrNull())
+                    ?.takeIf { it > 0 }
             ),
-            firstLineIndentPoints = Units.twipsToPoints(ind?.wAttr("firstLine")?.toIntOrNull()),
-            hangingIndentPoints = Units.twipsToPoints(ind?.wAttr("hanging")?.toIntOrNull()),
-            spaceBeforePoints = Units.twipsToPoints(spacing?.wAttr("before")?.toIntOrNull()),
-            spaceAfterPoints = Units.twipsToPoints(spacing?.wAttr("after")?.toIntOrNull()),
+            firstLineIndentPoints = Units.twipsToPoints(ind?.wAttr("firstLine")?.toIntOrNull()?.takeIf { it > 0 }),
+            hangingIndentPoints = Units.twipsToPoints(ind?.wAttr("hanging")?.toIntOrNull()?.takeIf { it > 0 }),
+            spaceBeforePoints = Units.twipsToPoints(spacing?.wAttr("before")?.toIntOrNull()?.takeIf { it > 0 }),
+            spaceAfterPoints = Units.twipsToPoints(spacing?.wAttr("after")?.toIntOrNull()?.takeIf { it > 0 }),
             lineSpacing = lineSpacing(spacing),
             lineSpacingRule = spacing?.wAttr("lineRule"),
             keepNext = DocxRunProperties.onOff(pPr.wFirst("keepNext")),
@@ -124,7 +126,7 @@ object DocxParagraphProperties {
     }
 
     private fun lineSpacing(spacing: Element?): Double? {
-        val line = spacing?.wAttr("line")?.toIntOrNull() ?: return null
+        val line = spacing?.wAttr("line")?.toIntOrNull()?.takeIf { it > 0 } ?: return null
         val rule = spacing.wAttr("lineRule")
         return if (rule == "auto") line / 240.0 else Units.twipsToPoints(line)
     }

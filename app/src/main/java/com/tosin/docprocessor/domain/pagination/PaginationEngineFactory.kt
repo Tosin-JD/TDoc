@@ -10,6 +10,39 @@ import com.tosin.docprocessor.domain.model.DocumentElement
  */
 class PaginationEngineFactory(private val context: Context) {
 
+    class EngineComponents(
+        val unitConverter: UnitConverter,
+        val textMeasurer: TextMeasurer,
+        val registry: LayoutRegistry,
+        val flowController: FlowController,
+        val imageDimensionsProvider: ImageDimensionsProvider,
+        val printPaginator: PrintPaginator,
+        val incrementalPaginator: IncrementalPaginator
+    )
+
+    fun createEngineComponents(): EngineComponents {
+        val unitConverter = UnitConverter(context)
+        val textMeasurer = TextMeasurer(context, unitConverter)
+        val registry = LayoutRegistry()
+        val flowController = FlowController(textMeasurer, unitConverter)
+        val imageDimensionsProvider = BitmapImageDimensionsProvider()
+        val printPaginator = PrintPaginator(
+            textMeasurer, unitConverter, registry, flowController, imageDimensionsProvider
+        )
+        val incrementalPaginator = IncrementalPaginator(
+            printPaginator, textMeasurer, unitConverter, registry, flowController, imageDimensionsProvider
+        )
+        return EngineComponents(
+            unitConverter = unitConverter,
+            textMeasurer = textMeasurer,
+            registry = registry,
+            flowController = flowController,
+            imageDimensionsProvider = imageDimensionsProvider,
+            printPaginator = printPaginator,
+            incrementalPaginator = incrementalPaginator
+        )
+    }
+
     /**
      * Create a complete pagination engine with all components.
      *
@@ -77,6 +110,8 @@ fun DocumentElement.getTypeName(): String {
     return when (this) {
         is DocumentElement.Paragraph -> "Paragraph"
         is DocumentElement.Table -> "Table"
+        is DocumentElement.TableRow -> "TableRow"
+        is DocumentElement.TableCell -> "TableCell"
         is DocumentElement.Image -> "Image"
         is DocumentElement.SectionHeader -> "Section Header"
         is DocumentElement.Section -> "Section"

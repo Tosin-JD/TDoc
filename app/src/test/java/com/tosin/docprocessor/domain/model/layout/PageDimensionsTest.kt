@@ -31,6 +31,6 @@ class PageDimensionsTest {
     @Test
     fun `footer rect ends at margin bottom`() {
         val dims = PageDimensions(footerHeight = 24f)
-        assertEquals(dims.height - dims.marginBottom, dims.footerRect.bottom, 0.01f)
+        assertEquals(dims.height - dims.footerEdgePt, dims.footerRect.bottom, 0.01f)
     }
 }

@@ -7,31 +7,19 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.tosin.docprocessor.core.rendering.BitmapImageDimensionsProvider
-import com.tosin.docprocessor.core.rendering.PrintElementRenderer
-import com.tosin.docprocessor.domain.model.DocumentData
-import com.tosin.docprocessor.domain.model.DocumentElement
-import com.tosin.docprocessor.domain.model.layout.PageDimensions
-import com.tosin.docprocessor.domain.pagination.FlowController
-import com.tosin.docprocessor.domain.pagination.LayoutRegistry
-import com.tosin.docprocessor.domain.pagination.PrintPaginator
-import com.tosin.docprocessor.domain.pagination.SectionResolver
-import com.tosin.docprocessor.domain.pagination.TextMeasurer
-import com.tosin.docprocessor.domain.pagination.UnitConverter
 import com.tosin.docprocessor.ui.editor.EditorViewModel
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 private const val PRINT_PREVIEW_SCALE = 0.82f
 
@@ -42,67 +30,44 @@ fun PrintLayout(
     isEditable: Boolean,
     isDarkMode: Boolean = false
 ) {
-    val context = LocalContext.current
-    val unitConverter = remember(context) { UnitConverter(context) }
-    val textMeasurer = remember(context, unitConverter) { TextMeasurer(context, unitConverter) }
-    val layoutRegistry = remember { LayoutRegistry() }
-    val flowController = remember(textMeasurer, unitConverter) { FlowController(textMeasurer, unitConverter) }
-    val imageDimensionsProvider = remember { BitmapImageDimensionsProvider() }
-    val paginator = remember(
-        textMeasurer, unitConverter, layoutRegistry, flowController, imageDimensionsProvider
-    ) {
-        PrintPaginator(
-            textMeasurer, unitConverter, layoutRegistry, flowController, imageDimensionsProvider
-        )
-    }
-    val renderer = remember(unitConverter) { PrintElementRenderer(unitConverter) }
-    val sectionResolver = remember { SectionResolver() }
+    val listState = rememberLazyListState()
+    val pages by viewModel.pages.collectAsState()
 
-    val currentDocument by viewModel.currentDocument.collectAsState()
-    val documentData = remember(currentDocument, viewModel.documentElements) {
-        currentDocument?.copy(content = viewModel.documentElements)
-            ?: DocumentData(content = viewModel.documentElements)
-    }
-
-    val pages by produceState(
-        initialValue = emptyList(),
-        key1 = documentData,
-        key2 = paginator,
-        key3 = isDarkMode
-    ) {
-        value = withContext(Dispatchers.Default) {
-            val defaultDimensions = documentData.content
-                .filterIsInstance<DocumentElement.Section>()
-                .firstOrNull()
-                ?.let { sectionResolver.resolve(it.properties) }
-                ?: PageDimensions.A4
-
-            paginator.paginate(documentData, defaultDimensions, isDarkMode = isDarkMode)
+    LaunchedEffect(pages, listState) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val mostVisibleItem = layoutInfo.visibleItemsInfo.maxByOrNull { item ->
+                (minOf(item.offset + item.size, layoutInfo.viewportEndOffset) -
+                    maxOf(item.offset, layoutInfo.viewportStartOffset)).coerceAtLeast(0)
+            }
+            mostVisibleItem?.index?.plus(1) to pages.size.coerceAtLeast(1)
         }
+            .distinctUntilChanged()
+            .collect { (currentPage, pageCount) ->
+                viewModel.onPrintPageChanged(currentPage ?: 1, pageCount)
+            }
     }
-
-    val containerBackground = if (isDarkMode) Color(0xFF1E1E1E) else Color(0xFFE4E4E4)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(containerBackground),
+            .background(if (isDarkMode) Color(0xFF1E1E1E) else Color(0xFFE4E4E4)),
         contentAlignment = Alignment.TopCenter
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
+            state = listState,
             contentPadding = PaddingValues(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             items(
                 items = pages,
-                key = { page -> page.index }
+                key = { page -> page.stableKey.ifEmpty { page.index } }
             ) { page ->
-                PageView(
+                CanvasPageView(
                     pageModel = page,
-                    renderer = renderer,
-                    unitConverter = unitConverter,
+                    pageCount = pages.size,
                     viewModel = viewModel,
                     isEditable = isEditable,
                     scale = PRINT_PREVIEW_SCALE,

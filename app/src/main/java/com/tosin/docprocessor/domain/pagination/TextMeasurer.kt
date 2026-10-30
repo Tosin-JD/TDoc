@@ -1,13 +1,18 @@
 package com.tosin.docprocessor.domain.pagination
 
 import android.content.Context
+import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import com.tosin.docprocessor.core.color.DocumentColorTokens
 import com.tosin.docprocessor.core.color.DocumentTextColorResolver
 import com.tosin.docprocessor.core.text.AndroidTypefaceMapper
+import com.tosin.docprocessor.core.text.NativeTextMeasurer
 import com.tosin.docprocessor.core.text.SpannableTextBuilder
+import com.tosin.docprocessor.core.text.TextPaintCache
+import com.tosin.docprocessor.core.text.TextPaintKey
+import com.tosin.docprocessor.core.text.TypefaceResolver
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
@@ -19,6 +24,7 @@ import com.tosin.docprocessor.domain.typography.TextFlowResolver
 /**
  * Measures text dimensions using Android's low-level StaticLayout.
  * This is significantly faster and more accurate than using Views.
+ * Now uses native Paint-based measurement with caching for better performance.
  */
 class TextMeasurer(
     private val context: Context,
@@ -26,6 +32,9 @@ class TextMeasurer(
     private val fontResolver: FontFamilyResolver = FontFamilyResolver(),
     private val flowResolver: TextFlowResolver = TextFlowResolver()
 ) {
+    private val typefaceResolver = TypefaceResolver(context)
+    private val paintCache = TextPaintCache(typefaceResolver)
+    private val nativeTextMeasurer = NativeTextMeasurer(context, unitConverter, typefaceResolver)
     fun measureParagraph(
         spans: List<TextSpan>,
         style: ParagraphStyle,
@@ -90,10 +99,11 @@ class TextMeasurer(
         val effectiveWidth = (widthPt - indentation.leftPt - indentation.rightPt)
             .coerceAtLeast(72f)
 
-        val baseSizePt = spans.mapNotNull { it.fontSize?.toFloat() }.maxOrNull() ?: DEFAULT_FONT_SIZE_PT
+        val baseSizePt = DEFAULT_FONT_SIZE_PT
         val tokens = tokens(isDarkMode)
+        val visibleSpans = spans.filter { !it.isHidden }
         val text = SpannableTextBuilder.build(
-            spans = spans,
+            spans = visibleSpans,
             baseSizePt = baseSizePt,
             fontResolver = fontResolver,
             tokens = tokens,
@@ -105,6 +115,11 @@ class TextMeasurer(
         val paint = createBasePaint(baseSizePt, isDarkMode)
         val lineSpacing = lineSpacingFor(flowResolver.resolveLineHeight(style.spacing), paint)
 
+        val firstLineIndentPx = unitConverter.ptToPx(indentation.firstLinePt - indentation.hangingPt).toInt()
+        val restLineIndentPx = unitConverter.ptToPx(indentation.leftPt + indentation.hangingPt).toInt()
+        val leftMarginPx = unitConverter.ptToPx(indentation.leftPt).toInt()
+        val firstLineMarginPx = unitConverter.ptToPx(indentation.firstLinePt).toInt()
+
         return buildLayout(
             text = text,
             paint = paint,
@@ -112,7 +127,9 @@ class TextMeasurer(
             alignment = alignmentToLayout(style.alignment),
             lineSpacingPx = lineSpacing.first,
             lineSpacingMultiplier = lineSpacing.second,
-            justificationMode = justificationModeFor(style.alignment)
+            justificationMode = justificationModeFor(style.alignment),
+            firstLineIndentPx = firstLineIndentPx,
+            restLineIndentPx = restLineIndentPx
         )
     }
 
@@ -151,8 +168,38 @@ class TextMeasurer(
         return if (lineNumber < layout.lineCount) layout.getLineEnd(lineNumber) else layout.text.length
     }
 
+    /**
+     * Measure text width using native Paint (P0-1)
+     */
+    fun measureWidth(
+        text: String,
+        fontSizePt: Float = 12f,
+        isBold: Boolean = false,
+        isItalic: Boolean = false,
+        fontFamily: String? = null
+    ): Float {
+        val sizePx = unitConverter.ptToPx(fontSizePt)
+        val style = when {
+            isBold && isItalic -> Typeface.BOLD_ITALIC
+            isBold -> Typeface.BOLD
+            isItalic -> Typeface.ITALIC
+            else -> Typeface.NORMAL
+        }
+        val key = TextPaintKey(
+            typefaceName = fontFamily,
+            sizePx = sizePx,
+            style = style,
+            letterSpacing = 0f,
+            skewX = 0f,
+            flags = android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.SUBPIXEL_TEXT_FLAG
+        )
+        return nativeTextMeasurer.measureWidth(text, key)
+    }
+    
     fun clearCache() {
         AndroidTypefaceMapper.clearCache()
+        paintCache.clear()
+        nativeTextMeasurer.clearCache()
     }
 
     private fun tokens(isDarkMode: Boolean): DocumentColorTokens =
@@ -200,7 +247,9 @@ class TextMeasurer(
         alignment: Layout.Alignment,
         lineSpacingPx: Float = 0f,
         lineSpacingMultiplier: Float = 1f,
-        justificationMode: Int = Layout.JUSTIFICATION_MODE_NONE
+        justificationMode: Int = Layout.JUSTIFICATION_MODE_NONE,
+        firstLineIndentPx: Int = 0,
+        restLineIndentPx: Int = 0
     ): StaticLayout {
         val widthPx = unitConverter.ptToPx(widthPt).toInt().coerceAtLeast(1)
 
@@ -215,11 +264,22 @@ class TextMeasurer(
             builder.setJustificationMode(justificationMode)
         }
 
+        if (firstLineIndentPx != 0 || restLineIndentPx != 0) {
+            val indents = IntArray(text.length + 1)
+            if (text.isNotEmpty()) {
+                indents[0] = firstLineIndentPx.coerceAtLeast(0)
+            }
+            for (i in 1..text.length) {
+                indents[i] = restLineIndentPx.coerceAtLeast(0)
+            }
+            builder.setIndents(indents, null)
+        }
+
         return builder.build()
     }
 
     private companion object {
-        const val DEFAULT_FONT_SIZE_PT = 12f
+        const val DEFAULT_FONT_SIZE_PT = 11f
     }
 }
 

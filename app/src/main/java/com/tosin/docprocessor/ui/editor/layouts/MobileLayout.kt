@@ -11,6 +11,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.ui.editor.EditorViewModel
 import com.tosin.docprocessor.ui.editor.renderer.DocumentElementRenderer
+import com.tosin.docprocessor.domain.model.toDocumentElement
 
 
 import androidx.compose.foundation.background
@@ -31,7 +32,7 @@ fun MobileLayout(
             .padding(16.dp)
             .focusRequester(focusRequester)
     ) {
-        itemsIndexed(viewModel.documentElements) { index, element ->
+        itemsIndexed(viewModel.documentElements.map { it.toDocumentElement() }) { index, element ->
             DocumentElementRenderer(
                 element = element,
                 index = index,
