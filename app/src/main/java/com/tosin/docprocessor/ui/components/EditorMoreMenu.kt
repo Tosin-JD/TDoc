@@ -17,9 +17,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.tosin.docprocessor.domain.model.ThemeMode
 import com.tosin.docprocessor.domain.model.ViewMode
 import com.tosin.docprocessor.ui.editor.EditorUiState
 
+/**
+ * Editor overflow menu.
+ *
+ * Display state comes from [uiState]; the theme rows are driven by the resolved
+ * app theme ([isDarkTheme] + [themeMode]) and report changes through the theme
+ * callbacks instead of mutating editor state.
+ */
 @Composable
 fun EditorMoreMenu(
     expanded: Boolean,
@@ -27,7 +35,10 @@ fun EditorMoreMenu(
     uiState: EditorUiState,
     onViewModeChange: (ViewMode) -> Unit,
     onToggleSuggestChanges: () -> Unit,
-    onToggleDarkMode: () -> Unit = {},
+    isDarkTheme: Boolean = false,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    onSetDarkMode: (Boolean) -> Unit = {},
+    onUseSystemTheme: () -> Unit = {},
     onToggleStarred: () -> Unit,
     onDocumentOutlineClick: () -> Unit = {},
     onFindReplaceClick: () -> Unit = {},
@@ -52,7 +63,7 @@ fun EditorMoreMenu(
             trailingIcon = {
                 Switch(
                     checked = uiState.viewMode == ViewMode.PRINT,
-                    onCheckedChange = { 
+                    onCheckedChange = {
                         onViewModeChange(if (it) ViewMode.PRINT else ViewMode.MOBILE)
                         onDismissRequest()
                     }
@@ -62,14 +73,30 @@ fun EditorMoreMenu(
         DropdownMenuItem(
             text = { Text("Dark Mode") },
             onClick = {
-                onToggleDarkMode()
+                onSetDarkMode(!isDarkTheme)
                 onDismissRequest()
             },
             trailingIcon = {
                 Switch(
-                    checked = uiState.isDarkMode,
+                    checked = isDarkTheme,
                     onCheckedChange = {
-                        onToggleDarkMode()
+                        onSetDarkMode(it)
+                        onDismissRequest()
+                    }
+                )
+            }
+        )
+        DropdownMenuItem(
+            text = { Text("Use system theme") },
+            onClick = {
+                if (themeMode == ThemeMode.SYSTEM) onSetDarkMode(isDarkTheme) else onUseSystemTheme()
+                onDismissRequest()
+            },
+            trailingIcon = {
+                Switch(
+                    checked = themeMode == ThemeMode.SYSTEM,
+                    onCheckedChange = {
+                        if (it) onUseSystemTheme() else onSetDarkMode(isDarkTheme)
                         onDismissRequest()
                     }
                 )
@@ -77,14 +104,14 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Suggest Changes") },
-            onClick = { 
+            onClick = {
                 onToggleSuggestChanges()
                 onDismissRequest()
             },
             trailingIcon = {
                 Switch(
                     checked = uiState.isSuggestChangesEnabled,
-                    onCheckedChange = { 
+                    onCheckedChange = {
                         onToggleSuggestChanges()
                         onDismissRequest()
                     }
@@ -93,7 +120,7 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Document Outline") },
-            onClick = { 
+            onClick = {
                 onDocumentOutlineClick()
                 onDismissRequest()
             },
@@ -101,7 +128,7 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Find and replace") },
-            onClick = { 
+            onClick = {
                 onFindReplaceClick()
                 onDismissRequest()
             },
@@ -109,7 +136,7 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Word count") },
-            onClick = { 
+            onClick = {
                 onWordCountClick()
                 onDismissRequest()
             },
@@ -117,7 +144,7 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Horizontal line") },
-            onClick = { 
+            onClick = {
                 onHorizontalLineClick()
                 onDismissRequest()
             },
@@ -125,7 +152,7 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Make a copy") },
-            onClick = { 
+            onClick = {
                 onMakeCopyClick()
                 onDismissRequest()
             },
@@ -133,7 +160,7 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Print / Save as PDF") },
-            onClick = { 
+            onClick = {
                 onShareExportClick()
                 onDismissRequest()
             },
@@ -141,7 +168,7 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Export as PDF") },
-            onClick = { 
+            onClick = {
                 onShareExportClick()
                 onDismissRequest()
             },
@@ -149,7 +176,7 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Move") },
-            onClick = { 
+            onClick = {
                 onMoveClick()
                 onDismissRequest()
             },
@@ -157,14 +184,14 @@ fun EditorMoreMenu(
         )
         DropdownMenuItem(
             text = { Text("Star") },
-            onClick = { 
+            onClick = {
                 onToggleStarred()
                 onDismissRequest()
             },
             trailingIcon = {
                 Switch(
                     checked = uiState.isStarred,
-                    onCheckedChange = { 
+                    onCheckedChange = {
                         onToggleStarred()
                         onDismissRequest()
                     }

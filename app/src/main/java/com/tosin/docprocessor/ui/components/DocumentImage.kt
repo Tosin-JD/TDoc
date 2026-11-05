@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.core.color.DocumentColorTokens
 import com.tosin.docprocessor.domain.pagination.ImageLayoutConfig
 import com.tosin.docprocessor.domain.pagination.ImageScaleCalculator
+import com.tosin.docprocessor.ui.theme.LocalAppIsDarkTheme
 import java.io.File
 
 /**
@@ -36,8 +37,7 @@ import java.io.File
 fun ImageWidget(
     sourceUri: String,
     caption: String?,
-    altText: String?,
-    isDarkMode: Boolean = false
+    altText: String?
 ) {
     val imageBitmap = remember(sourceUri) {
         File(sourceUri)
@@ -49,11 +49,10 @@ fun ImageWidget(
         DocumentImage(
             imageBitmap = imageBitmap,
             caption = caption,
-            altText = altText,
-            isDarkMode = isDarkMode
+            altText = altText
         )
     } else {
-        ImageUnavailable(caption = caption, altText = altText, isDarkMode = isDarkMode)
+        ImageUnavailable(caption = caption, altText = altText)
     }
 }
 
@@ -74,11 +73,11 @@ fun DocumentImage(
     caption: String?,
     altText: String?,
     modifier: Modifier = Modifier,
-    config: ImageLayoutConfig = ImageLayoutConfig.Default,
-    isDarkMode: Boolean = false
+    config: ImageLayoutConfig = ImageLayoutConfig.Default
 ) {
     val density = LocalDensity.current
-    val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
+    val tokens = if (LocalAppIsDarkTheme.current) DocumentColorTokens.Dark
+    else DocumentColorTokens.Light
 
     Column(modifier = modifier.fillMaxWidth()) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -126,10 +125,10 @@ fun DocumentImage(
 @Composable
 private fun ImageUnavailable(
     caption: String?,
-    altText: String?,
-    isDarkMode: Boolean
+    altText: String?
 ) {
-    val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
+    val tokens = if (LocalAppIsDarkTheme.current) DocumentColorTokens.Dark
+    else DocumentColorTokens.Light
     Text(
         text = caption ?: altText ?: "Image unavailable",
         style = MaterialTheme.typography.bodyMedium,

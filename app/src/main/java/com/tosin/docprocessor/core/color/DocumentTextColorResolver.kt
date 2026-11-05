@@ -7,9 +7,10 @@ import kotlin.math.roundToInt
  * Pure colour helpers for document rendering. No Android or Compose types, so
  * these functions are unit-testable on the JVM and safe to call from `domain`.
  *
- * The resolver guarantees that document text stays visible in dark mode: source
- * colours that fail WCAG AA contrast against the page background are lightened
- * toward white, while readable bright colours keep their semantics.
+ * The resolver guarantees that document text stays visible on the page in both
+ * modes: source colours that fail WCAG AA contrast against the page background
+ * are lightened toward white on dark pages and darkened toward black on light
+ * pages, while readable colours keep their semantics untouched.
  */
 object DocumentTextColorResolver {
 
@@ -57,18 +58,22 @@ object DocumentTextColorResolver {
     /**
      * Resolves a source colour for display.
      *
-     * Light mode returns the parsed colour (or [DocumentColorTokens.contentText]
-     * when unset/invalid). Dark mode keeps bright, readable colours and lightens
-     * dark ones until [MIN_CONTRAST] is met; pure black and transparent values
-     * fall back to [DocumentColorTokens.contentText].
+     * Unset, invalid, transparent and pure-black values fall back to
+     * [DocumentColorTokens.contentText]. Colours that already meet
+     * [MIN_CONTRAST] against the page are returned untouched in both modes.
+     * Failing colours are lightened on dark pages and darkened on light pages
+     * so authored content never disappears against the page.
      */
     fun resolveTextColor(source: String?, tokens: DocumentColorTokens, darkMode: Boolean): Int {
         val parsed = parseColorString(source) ?: return tokens.contentText
-        if (!darkMode) return parsed
         if (((parsed ushr 24) and 0xFF) == 0) return tokens.contentText
         if ((parsed and 0x00FFFFFF) == 0) return tokens.contentText
         if (contrastRatio(parsed, tokens.pageBackground) >= MIN_CONTRAST) return parsed
-        return lightenUntilReadable(parsed, tokens.pageBackground)
+        return if (darkMode) {
+            lightenUntilReadable(parsed, tokens.pageBackground)
+        } else {
+            darkenUntilReadable(parsed, tokens.pageBackground)
+        }
     }
 
     /** Concrete replacement for hardcoded black/white plain-text colours. */
@@ -91,6 +96,25 @@ object DocumentTextColorResolver {
             t += 0.02
         }
         return argb(alpha, 255, 255, 255)
+    }
+
+    private fun darkenUntilReadable(color: Int, background: Int): Int {
+        val alpha = (color ushr 24) and 0xFF
+        val r = (color ushr 16) and 0xFF
+        val g = (color ushr 8) and 0xFF
+        val b = color and 0xFF
+        var t = 0.0
+        while (t <= 1.0) {
+            val mixed = argb(
+                alpha,
+                (r - r * t).roundToInt(),
+                (g - g * t).roundToInt(),
+                (b - b * t).roundToInt()
+            )
+            if (contrastRatio(mixed, background) >= MIN_CONTRAST) return mixed
+            t += 0.02
+        }
+        return argb(alpha, 0, 0, 0)
     }
 
     private fun channel(argb: Int, shift: Int): Float {

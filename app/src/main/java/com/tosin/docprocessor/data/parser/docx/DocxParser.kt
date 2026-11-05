@@ -351,6 +351,10 @@ class DocxParser(
             type = sectPr.firstChild("type")?.attribute("val"),
             pageWidth = pageSize?.attribute("w")?.toIntOrNull(),
             pageHeight = pageSize?.attribute("h")?.toIntOrNull(),
+            orientation = pageSize?.attribute("orient"),
+            headerEdge = pageMargins?.attribute("header")?.toIntOrNull(),
+            footerEdge = pageMargins?.attribute("footer")?.toIntOrNull(),
+            gutter = pageMargins?.attribute("gutter")?.toIntOrNull(),
             margins = EdgeInsets(
                 top = pageMargins?.attribute("top")?.toIntOrNull(),
                 right = pageMargins?.attribute("right")?.toIntOrNull(),

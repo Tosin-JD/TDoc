@@ -10,6 +10,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -60,6 +61,11 @@ class DocumentTextStyleMapper(
 
         val textStyle = baseStyle.copy(
             lineHeight = lineHeightSp.sp,
+            textIndent = TextIndent(
+                firstLine = (paragraph.style.indentation.firstLine
+                    ?: paragraph.style.indentation.hanging?.let { -it })?.twipsToSp() ?: 0.sp,
+                restLine = 0.sp
+            ),
             platformStyle = PlatformTextStyle(includeFontPadding = false),
             lineHeightStyle = LineHeightStyle(
                 alignment = LineHeightStyle.Alignment.Proportional,
@@ -131,6 +137,7 @@ class DocumentTextStyleMapper(
     }
 
     private fun Int?.twipsToDp() = ((this ?: 0) / TWIPS_PER_POINT).dp
+    private fun Int?.twipsToSp() = ((this ?: 0) / TWIPS_PER_POINT).sp
 
     private companion object {
         const val DEFAULT_FONT_SIZE_SP = 16f

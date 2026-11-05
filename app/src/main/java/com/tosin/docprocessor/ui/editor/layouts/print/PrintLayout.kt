@@ -1,5 +1,6 @@
 package com.tosin.docprocessor.ui.editor.layouts.print
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.tosin.docprocessor.core.color.DocumentColorTokens
 import com.tosin.docprocessor.core.rendering.BitmapImageDimensionsProvider
 import com.tosin.docprocessor.core.rendering.PrintElementRenderer
 import com.tosin.docprocessor.domain.model.DocumentData
@@ -39,7 +41,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 
-private const val PRINT_PREVIEW_SCALE = 0.82f
 
 @Composable
 fun PrintLayout(
@@ -64,6 +65,11 @@ fun PrintLayout(
     val renderer = remember(unitConverter) { PrintElementRenderer(unitConverter) }
     val sectionResolver = remember { SectionResolver() }
     val listState = rememberLazyListState()
+    val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
+    val canvasColor by animateColorAsState(
+        targetValue = Color(tokens.canvasBackground),
+        label = "print-canvas"
+    )
 
     val currentDocument by viewModel.currentDocument.collectAsState()
     val documentData = remember(currentDocument, viewModel.documentElements) {
@@ -82,7 +88,7 @@ fun PrintLayout(
                 // Use first section as base; paginator will handle subsequent sections
                 sectionResolver.resolve(sections.first().properties)
             } else {
-                PageDimensions.A4
+                    PageDimensions.Default
             }
 
             paginator.paginate(documentData, defaultDimensions, isDarkMode = isDarkMode)
@@ -117,7 +123,7 @@ fun PrintLayout(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (isDarkMode) Color(0xFF1E1E1E) else Color(0xFFE4E4E4)),
+            .background(canvasColor),
         contentAlignment = Alignment.TopCenter
     ) {
         LazyColumn(
@@ -138,7 +144,6 @@ fun PrintLayout(
                     unitConverter = unitConverter,
                     viewModel = viewModel,
                     isEditable = isEditable,
-                    scale = PRINT_PREVIEW_SCALE,
                     isDarkMode = isDarkMode
                 )
             }

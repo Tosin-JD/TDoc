@@ -14,13 +14,26 @@ class SectionResolver {
     private fun twipsToPt(twips: Int): Float = twips * (72f / 1440f)
 
     fun resolve(section: SectionProperties): PageDimensions {
+        val rawWidth = section.pageWidth?.takeIf { it > 0 }?.let { twipsToPt(it) }
+            ?: PageDimensions.Default.width
+        val rawHeight = section.pageHeight?.takeIf { it > 0 }?.let { twipsToPt(it) }
+            ?: PageDimensions.Default.height
+        val landscape = section.orientation.equals("landscape", ignoreCase = true)
+        val portrait = section.orientation.equals("portrait", ignoreCase = true)
+        val (width, height) = when {
+            landscape && rawWidth < rawHeight -> rawHeight to rawWidth
+            portrait && rawWidth > rawHeight -> rawHeight to rawWidth
+            else -> rawWidth to rawHeight
+        }
         return PageDimensions(
-            width = section.pageWidth?.takeIf { it > 0 }?.let { twipsToPt(it) } ?: PageDimensions.A4.width,
-            height = section.pageHeight?.takeIf { it > 0 }?.let { twipsToPt(it) } ?: PageDimensions.A4.height,
-            marginLeft = section.margins.left?.let { twipsToPt(it) } ?: 72f,
+            width = width,
+            height = height,
+            marginLeft = (section.margins.left?.let { twipsToPt(it) } ?: 72f) + (section.gutter?.let { twipsToPt(it) } ?: 0f),
             marginTop = section.margins.top?.let { twipsToPt(it) } ?: 72f,
             marginRight = section.margins.right?.let { twipsToPt(it) } ?: 72f,
-            marginBottom = section.margins.bottom?.let { twipsToPt(it) } ?: 72f
+            marginBottom = section.margins.bottom?.let { twipsToPt(it) } ?: 72f,
+            headerEdgePt = section.headerEdge?.let { twipsToPt(it) } ?: 36f,
+            footerEdgePt = section.footerEdge?.let { twipsToPt(it) } ?: 36f
         )
     }
 }

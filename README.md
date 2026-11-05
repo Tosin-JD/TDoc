@@ -243,6 +243,57 @@ ParserFactory
 5. **Result Pattern** - No exception throwing, `Result<T>` wrapper
 6. **Suspension Pattern** - Async with `suspend fun` and `Dispatchers.IO`
 
+## Preview Mode
+
+TDoc renders documents in preview mode in two distinct layouts, controlled by the `ViewMode` and `EditorMode` enums:
+
+- **Mobile view** (`ViewMode.MOBILE`) - a reflowing, scrollable list of every document element. There are no pages or margins; content flows to fit the screen width.
+- **Print view** (`ViewMode.PRINT`) - a paginated set of page-sized sheets, with margins, headers, footers, real page breaks, and a page counter.
+
+### How the two views are wired
+
+`EditorScreen` selects the active layout based on `uiState.viewMode`:
+
+```kotlin
+when (uiState.viewMode) {
+    ViewMode.MOBILE -> MobileLayout(...)
+    ViewMode.PRINT  -> PrintLayout(...)
+}
+```
+
+`EditorMode` (`EDIT` or `PREVIEW`) decides whether content is editable. In `PREVIEW` mode the layout renders read-only; in `EDIT` mode the same composables draw text fields and editable overlays so the user can type.
+
+### The print pipeline (what happens when you open the print view)
+
+1. `PrintLayout` builds the pagination engine (`PrintPaginator`).
+2. `PrintPaginator` measures every element (via `TextMeasurer`, which uses Android's `StaticLayout`), then splits and places elements onto pages, handling page breaks, keep-with-next, widows/orphans, and atomic elements (images).
+3. Each resulting `PageModel` is rendered by `PageView`, which scales the page to fit the screen while preserving aspect ratio, and drawn by `PrintElementRenderer` to a `Canvas`.
+4. On demand, the pages are exported to PDF through `DocumentPrintAdapter` (Android print service).
+
+### The mobile pipeline
+
+`MobileLayout` is a `LazyColumn` that renders body content in document order. `MobileContentPolicy` classifies each `DocumentElement` first: paragraphs, headings, tables, images and unsupported-object placeholders are body content; `Section` page setup, `PageBreak`, `HeaderFooter` stories and metadata/annotation records are control data and never enter the reading list, so no internal serialization can appear as a paragraph. `DocumentElementRenderer` then dispatches each body element to its renderer.
+
+### Mobile rendering policy
+
+Mobile view is a **reflowing reading/editing surface**, not a miniature printed page:
+
+- Text wraps to the viewport; there is no fixed paper width and no page/column break spacing.
+- Section setup (paper size, margins, columns) affects print pagination only.
+- Header/footer stories, metadata, bookmarks, fields, comments and notes are omitted from the body. Notes/comments panels are not implemented yet.
+- Tables keep a minimum readable column width and scroll horizontally when they overflow; prose never scrolls horizontally.
+- Images are constrained to the available width with their aspect ratio preserved; missing images fall back to their caption/alt text.
+- Content-bearing unsupported objects (drawings, embedded objects) render a compact placeholder; nothing is silently dropped from the package.
+- Horizontal padding adapts to the window width (20/32/48 dp) and honours display cutouts in landscape.
+
+### Theme
+
+There is exactly one light/dark source of truth. `ThemeMode` (`SYSTEM`, `LIGHT`, `DARK`) is persisted in `tdoc_settings` through `ThemeRepository`, exposed by `ThemeViewModel`, and resolved **once** in `MainActivity` with `resolveThemeMode(mode, isSystemInDarkTheme())`. `TDocTheme` publishes that resolved boolean through `LocalAppIsDarkTheme`, and the mobile renderer, tables, images and print page all read it — so app chrome and document content can never disagree. `res/values-night` gives the window the matching dark background, and authored document colours are contrast-checked in both directions (lightened on dark pages, darkened on light pages).
+
+### Guide
+
+For a full, new-contributor-friendly walkthrough of the preview mode - including the print paginator, text measurement, unit conversion, incremental updates, and the Android print path - see [PRINT_AND_MOBILE_PREVIEW_GUIDE.md](PRINT_AND_MOBILE_PREVIEW_GUIDE.md) (also in this directory).
+
 ---
 
 ## Usage Examples

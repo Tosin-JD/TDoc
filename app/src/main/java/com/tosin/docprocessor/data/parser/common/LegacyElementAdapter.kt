@@ -86,7 +86,15 @@ class LegacyElementAdapter {
 
     private fun blocks(nodes: List<BlockNode>): List<DocumentElement> {
         val output = mutableListOf<DocumentElement>()
+        var pendingDocxSection: SectionProperties? = null
+        var docxBoundaryCount = 0
         nodes.forEach { node ->
+            val isDocxBoundary = node is BlockNode.SectionBreak &&
+                node.anchor?.part?.contains("word/document.xml") == true
+            if (!isDocxBoundary && pendingDocxSection != null) {
+                output += DocumentElement.Section(properties = pendingDocxSection)
+                pendingDocxSection = null
+            }
             when (node) {
                 is BlockNode.Heading -> output += DocumentElement.SectionHeader(
                     text = inlineText(node.inlines),
@@ -113,25 +121,16 @@ class LegacyElementAdapter {
                 is BlockNode.TableRow, is BlockNode.TableCell -> Unit
                 is BlockNode.Figure -> output += figure(node)
                 is BlockNode.TextBox -> output += blocks(node.blocks)
-                is BlockNode.SectionBreak -> output += DocumentElement.Section(
-                    properties = SectionProperties(
-                        sectionIndex = node.style.index,
-                        source = node.anchor?.part ?: "document",
-                        type = node.style.type,
-                        pageWidth = node.style.page.widthPoints?.times(20)?.toInt(),
-                        pageHeight = node.style.page.heightPoints?.times(20)?.toInt(),
-                        margins = EdgeInsets(
-                            top = node.style.page.margins.topPoints?.times(20)?.toInt(),
-                            right = node.style.page.margins.rightPoints?.times(20)?.toInt(),
-                            bottom = node.style.page.margins.bottomPoints?.times(20)?.toInt(),
-                            left = node.style.page.margins.leftPoints?.times(20)?.toInt()
-                        ),
-                        columnCount = node.style.page.columns,
-                        pageNumberStart = node.style.pageNumberStart,
-                        headerReferences = emptyList<HeaderFooterReference>(),
-                        footerReferences = emptyList<HeaderFooterReference>()
-                    )
-                )
+                is BlockNode.SectionBreak -> {
+                    if (isDocxBoundary) {
+                        val properties = sectionProperties(node)
+                        docxBoundaryCount++
+                        if (docxBoundaryCount == 1) output.add(0, DocumentElement.Section(properties = properties))
+                        else pendingDocxSection = properties
+                    } else {
+                        output += DocumentElement.Section(properties = sectionProperties(node))
+                    }
+                }
                 is BlockNode.PageBreak -> output += DocumentElement.PageBreak()
                 is BlockNode.IndexBlock -> output += DocumentElement.Paragraph(
                     spans = listOf(TextSpan(text = node.title ?: node.kind.name))
@@ -145,6 +144,26 @@ class LegacyElementAdapter {
         }
         return output
     }
+
+    private fun sectionProperties(node: BlockNode.SectionBreak): SectionProperties = SectionProperties(
+        sectionIndex = node.style.index,
+        source = node.anchor?.part ?: "document",
+        type = node.style.type,
+        pageWidth = node.style.page.widthPoints?.times(20)?.toInt(),
+        pageHeight = node.style.page.heightPoints?.times(20)?.toInt(),
+        orientation = node.style.page.orientation?.name?.lowercase(),
+        headerEdge = node.style.page.margins.headerPoints?.times(20)?.toInt(),
+        footerEdge = node.style.page.margins.footerPoints?.times(20)?.toInt(),
+        gutter = node.style.page.margins.gutterPoints?.times(20)?.toInt(),
+        margins = EdgeInsets(
+            top = node.style.page.margins.topPoints?.times(20)?.toInt(),
+            right = node.style.page.margins.rightPoints?.times(20)?.toInt(),
+            bottom = node.style.page.margins.bottomPoints?.times(20)?.toInt(),
+            left = node.style.page.margins.leftPoints?.times(20)?.toInt()
+        ),
+        columnCount = node.style.page.columns,
+        pageNumberStart = node.style.pageNumberStart
+    )
 
     private fun paragraphElements(node: BlockNode.Paragraph): List<DocumentElement> {
         val pageBreakPositions = findPageBreakPositions(node.inlines)

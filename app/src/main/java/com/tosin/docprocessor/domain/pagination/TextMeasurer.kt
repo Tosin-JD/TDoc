@@ -96,8 +96,7 @@ class TextMeasurer(
     ): StaticLayout? {
         if (spans.isEmpty()) return null
 
-        val effectiveWidth = (widthPt - indentation.leftPt - indentation.rightPt)
-            .coerceAtLeast(72f)
+        val effectiveWidth = widthPt.coerceAtLeast(1f)
 
         val baseSizePt = DEFAULT_FONT_SIZE_PT
         val tokens = tokens(isDarkMode)
@@ -116,9 +115,7 @@ class TextMeasurer(
         val lineSpacing = lineSpacingFor(flowResolver.resolveLineHeight(style.spacing), paint)
 
         val firstLineIndentPx = unitConverter.ptToPx(indentation.firstLinePt - indentation.hangingPt).toInt()
-        val restLineIndentPx = unitConverter.ptToPx(indentation.leftPt + indentation.hangingPt).toInt()
-        val leftMarginPx = unitConverter.ptToPx(indentation.leftPt).toInt()
-        val firstLineMarginPx = unitConverter.ptToPx(indentation.firstLinePt).toInt()
+        val restLineIndentPx = unitConverter.ptToPx(indentation.hangingPt).toInt()
 
         return buildLayout(
             text = text,

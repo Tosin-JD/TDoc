@@ -63,18 +63,24 @@ import com.tosin.docprocessor.ui.components.EditorMoreMenu
 import com.tosin.docprocessor.ui.components.EditorToolbar
 import com.tosin.docprocessor.ui.editor.layouts.MobileLayout
 import com.tosin.docprocessor.ui.editor.layouts.print.PrintLayout
+import com.tosin.docprocessor.ui.theme.LocalAppIsDarkTheme
+import com.tosin.docprocessor.ui.theme.ThemeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(
     openDocumentUri: Uri? = null,
     onCloseRequest: () -> Unit = {},
-    viewModel: EditorViewModel = hiltViewModel()
+    viewModel: EditorViewModel = hiltViewModel(),
+    themeViewModel: ThemeViewModel = hiltViewModel()
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val focusRequester = remember { FocusRequester() }
     val uiState by viewModel.uiState.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
+    val themeMode by themeViewModel.themeMode.collectAsState()
+    // The one resolved theme value for all document rendering in this screen.
+    val isDarkTheme = LocalAppIsDarkTheme.current
     var showMoreMenu by remember { mutableStateOf(false) }
     var showFontSheet by remember { mutableStateOf(false) }
     var showDiagnostics by remember { mutableStateOf(false) }
@@ -164,7 +170,10 @@ fun EditorScreen(
                                 uiState = uiState,
                                 onViewModeChange = viewModel::setViewMode,
                                 onToggleSuggestChanges = viewModel::toggleSuggestChanges,
-                                onToggleDarkMode = viewModel::toggleDarkMode,
+                                isDarkTheme = isDarkTheme,
+                                themeMode = themeMode,
+                                onSetDarkMode = themeViewModel::setDarkMode,
+                                onUseSystemTheme = themeViewModel::useSystemTheme,
                                 onToggleStarred = viewModel::toggleStarred
                             )
                         }
@@ -207,7 +216,10 @@ fun EditorScreen(
                                 uiState = uiState,
                                 onViewModeChange = viewModel::setViewMode,
                                 onToggleSuggestChanges = viewModel::toggleSuggestChanges,
-                                onToggleDarkMode = viewModel::toggleDarkMode,
+                                isDarkTheme = isDarkTheme,
+                                themeMode = themeMode,
+                                onSetDarkMode = themeViewModel::setDarkMode,
+                                onUseSystemTheme = themeViewModel::useSystemTheme,
                                 onToggleStarred = viewModel::toggleStarred
                             )
                         }
@@ -242,13 +254,13 @@ fun EditorScreen(
                     ViewMode.MOBILE -> MobileLayout(
                         viewModel = viewModel,
                         focusRequester = focusRequester,
-                        isEditable = uiState.editorMode == EditorMode.EDIT,
-                        isDarkMode = uiState.isDarkMode
+                        isEditable = uiState.editorMode == EditorMode.EDIT
                     )
                     ViewMode.PRINT -> PrintLayout(
                         viewModel = viewModel,
                         focusRequester = focusRequester,
-                        isEditable = uiState.editorMode == EditorMode.EDIT
+                        isEditable = uiState.editorMode == EditorMode.EDIT,
+                        isDarkMode = isDarkTheme
                     )
                 }
 
@@ -258,6 +270,22 @@ fun EditorScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator()
+                    }
+                }
+
+                if (!uiState.isLoading && !uiState.isSaving) {
+                    val error = uiState.errorMessage
+                    when {
+                        error != null && viewModel.documentElements.isEmpty() -> DocumentStateMessage(
+                            title = "This file could not be opened",
+                            message = error,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                        uiState.documentData != null && viewModel.documentElements.isEmpty() -> DocumentStateMessage(
+                            title = "Nothing to display",
+                            message = "This document has no readable text content.",
+                            modifier = Modifier.align(Alignment.Center)
+                        )
                     }
                 }
 
@@ -298,6 +326,40 @@ fun EditorScreen(
             sheetState = diagnosticsSheetState,
             onDismiss = { showDiagnostics = false }
         )
+    }
+}
+
+/**
+ * Calm, actionable content state for an empty or unreadable document. Parser
+ * internals are never shown here.
+ */
+@Composable
+private fun DocumentStateMessage(
+    title: String,
+    message: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.padding(24.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
     }
 }
 

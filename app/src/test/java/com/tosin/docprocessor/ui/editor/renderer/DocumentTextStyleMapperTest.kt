@@ -1,5 +1,6 @@
 package com.tosin.docprocessor.ui.editor.renderer
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -13,8 +14,11 @@ import com.tosin.docprocessor.data.parser.internal.models.ParagraphIndentation
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphSpacing
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.core.color.DocumentColorTokens
+import com.tosin.docprocessor.core.color.DocumentTextColorResolver
 import com.tosin.docprocessor.domain.model.DocumentElement
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -85,6 +89,22 @@ class DocumentTextStyleMapperTest {
         )
         assertEquals("1. Bold lead-in", model.text.text)
         assertTrue(model.text.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+    }
+
+    @Test
+    fun `light authored span becomes readable on the light page`() {
+        val model = mapper.map(
+            paragraph(spans = listOf(TextSpan("invisible", color = "FFFFFF"))),
+            baseStyle,
+            isDarkMode = false
+        )
+
+        val resolved = model.text.spanStyles.first().item.color
+        assertNotEquals(Color.White, resolved)
+        assertEquals(
+            Color(DocumentTextColorResolver.resolveTextColor("FFFFFF", DocumentColorTokens.Light, false)),
+            resolved
+        )
     }
 
     @Test

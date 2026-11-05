@@ -27,7 +27,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.core.color.DocumentColorTokens
 import com.tosin.docprocessor.domain.model.DocumentElement
@@ -37,16 +36,17 @@ import com.tosin.docprocessor.ui.components.table.TableUiMapper
 import com.tosin.docprocessor.ui.components.table.model.CellTextAlignment
 import com.tosin.docprocessor.ui.components.table.model.TableRowUi
 import com.tosin.docprocessor.ui.components.table.model.TableUiModel
+import com.tosin.docprocessor.ui.theme.LocalAppIsDarkTheme
 
 /**
  * Convenience overload for callers that still hold a [DocumentElement.Table].
  * The mapping/normalization is delegated to [TableUiMapper].
  */
 @Composable
-fun TableWidget(table: DocumentElement.Table, isDarkMode: Boolean = false) {
+fun TableWidget(table: DocumentElement.Table) {
     val mapper = remember { TableUiMapper() }
     val model = remember(table) { mapper.map(table) }
-    DocumentTable(model = model, isDarkMode = isDarkMode)
+    DocumentTable(model = model)
 }
 
 /**
@@ -63,12 +63,13 @@ fun TableWidget(table: DocumentElement.Table, isDarkMode: Boolean = false) {
 fun DocumentTable(
     model: TableUiModel,
     modifier: Modifier = Modifier,
-    config: TableLayoutConfig = TableLayoutConfig.Default,
-    isDarkMode: Boolean = false
+    config: TableLayoutConfig = TableLayoutConfig.Default
 ) {
     if (model.isEmpty) return
 
-    val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
+    // Document colours follow the one resolved app theme.
+    val tokens = if (LocalAppIsDarkTheme.current) DocumentColorTokens.Dark
+    else DocumentColorTokens.Light
     val scrollState = rememberScrollState()
     val shape = RoundedCornerShape(config.cornerRadiusDp.dp)
 
@@ -150,9 +151,7 @@ private fun TableRowView(
                     else MaterialTheme.typography.bodyMedium,
                     fontWeight = if (row.isHeader) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (row.isHeader) Color(tokens.tableHeaderText)
-                    else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
+                    else MaterialTheme.colorScheme.onSurface
                 )
             }
 

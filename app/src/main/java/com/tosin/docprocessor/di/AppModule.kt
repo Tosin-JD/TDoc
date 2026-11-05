@@ -1,6 +1,8 @@
 package com.tosin.docprocessor.di
 
 import android.content.Context
+import com.tosin.docprocessor.data.local.SharedPrefsThemePreferences
+import com.tosin.docprocessor.data.local.ThemePreferences
 import com.tosin.docprocessor.data.local.dao.RecentFileDao
 import com.tosin.docprocessor.data.local.dao.SharedPrefsRecentFileDao
 import com.tosin.docprocessor.data.parser.ParserFactory
@@ -12,6 +14,8 @@ import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 import com.tosin.docprocessor.data.repository.DocumentRepository
 import com.tosin.docprocessor.data.repository.DocumentRepositoryImpl
+import com.tosin.docprocessor.data.repository.ThemeRepository
+import com.tosin.docprocessor.data.repository.ThemeRepositoryImpl
 import com.tosin.docprocessor.domain.typography.FontFamilyResolver
 import com.tosin.docprocessor.domain.typography.TextFlowResolver
 
@@ -30,6 +34,18 @@ object AppModule {
     @Singleton
     fun provideRecentFileDao(@ApplicationContext context: Context): RecentFileDao {
         return SharedPrefsRecentFileDao(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideThemePreferences(@ApplicationContext context: Context): ThemePreferences {
+        return SharedPrefsThemePreferences(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideThemeRepository(preferences: ThemePreferences): ThemeRepository {
+        return ThemeRepositoryImpl(preferences)
     }
 
     @Provides

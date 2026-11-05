@@ -2,6 +2,7 @@ package com.tosin.docprocessor.core.color
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DocumentTextColorResolverTest {
@@ -37,5 +38,70 @@ class DocumentTextColorResolverTest {
     fun `resolveTextColor falls back to content text for invalid source`() {
         val resolved = DocumentTextColorResolver.resolveTextColor("not-a-color", tokens, darkMode = true)
         assertEquals(tokens.contentText, resolved)
+    }
+
+    @Test
+    fun `resolveTextColor lightens dark authored text on a dark page`() {
+        val resolved = DocumentTextColorResolver.resolveTextColor("#202020", tokens, darkMode = true)
+
+        assertNotEquals(0xFF202020.toInt(), resolved)
+        assertTrue(
+            DocumentTextColorResolver.contrastRatio(resolved, tokens.pageBackground) >=
+                DocumentTextColorResolver.MIN_CONTRAST
+        )
+    }
+
+    @Test
+    fun `resolveTextColor darkens white authored text on a light page`() {
+        val lightTokens = DocumentColorTokens.Light
+        val resolved = DocumentTextColorResolver.resolveTextColor("#FFFFFF", lightTokens, darkMode = false)
+
+        assertNotEquals(0xFFFFFFFF.toInt(), resolved)
+        assertTrue(
+            DocumentTextColorResolver.contrastRatio(resolved, lightTokens.pageBackground) >=
+                DocumentTextColorResolver.MIN_CONTRAST
+        )
+    }
+
+    @Test
+    fun `resolveTextColor leaves readable dark text untouched on a light page`() {
+        val lightTokens = DocumentColorTokens.Light
+        val resolved = DocumentTextColorResolver.resolveTextColor("#333333", lightTokens, darkMode = false)
+
+        assertEquals(0xFF333333.toInt(), resolved)
+    }
+
+    @Test
+    fun `resolveTextColor preserves alpha while darkening in light mode`() {
+        val lightTokens = DocumentColorTokens.Light
+        val resolved = DocumentTextColorResolver.resolveTextColor("#80FFFFFF", lightTokens, darkMode = false)
+
+        assertEquals(0x80, (resolved ushr 24) and 0xFF)
+        assertTrue(
+            DocumentTextColorResolver.contrastRatio(resolved, lightTokens.pageBackground) >=
+                DocumentTextColorResolver.MIN_CONTRAST
+        )
+    }
+
+    @Test
+    fun `resolveTextColor leaves readable colours untouched in both modes`() {
+        val lightTokens = DocumentColorTokens.Light
+
+        assertEquals(
+            0xFF006400.toInt(),
+            DocumentTextColorResolver.resolveTextColor("#006400", lightTokens, darkMode = false)
+        )
+        assertEquals(
+            0xFF00FF00.toInt(),
+            DocumentTextColorResolver.resolveTextColor("#00FF00", tokens, darkMode = true)
+        )
+    }
+
+    @Test
+    fun `resolveTextColor treats transparent authored colour as unset`() {
+        val lightTokens = DocumentColorTokens.Light
+        val resolved = DocumentTextColorResolver.resolveTextColor("#00FFFFFF", lightTokens, darkMode = false)
+
+        assertEquals(lightTokens.contentText, resolved)
     }
 }

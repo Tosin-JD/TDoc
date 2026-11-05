@@ -1,5 +1,6 @@
 package com.tosin.docprocessor.ui.editor.layouts.print
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,8 +15,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -23,11 +28,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.tosin.docprocessor.core.color.DocumentColorTokens
 import com.tosin.docprocessor.core.rendering.PrintElementRenderer
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.layout.PageModel
@@ -46,7 +53,6 @@ fun PageView(
     viewModel: EditorViewModel,
     modifier: Modifier = Modifier,
     isEditable: Boolean = false,
-    scale: Float = 1f,
     isDarkMode: Boolean = false
 ) {
     val pageAspectRatio = remember(pageModel.dimensions.width, pageModel.dimensions.height) {
@@ -59,14 +65,21 @@ fun PageView(
     val basePageHeightPx = remember(pageModel.dimensions.height, unitConverter) {
         unitConverter.ptToPx(pageModel.dimensions.height)
     }
-    val renderBlock = remember(pageModel, renderer, scale, isEditable, isDarkMode, unitConverter) {
+    // Page, label and edit-field colours come from the same resolved theme as
+    // the chrome; no hardcoded black/white in the page surface.
+    val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
+    val pageColor by animateColorAsState(
+        targetValue = Color(tokens.pageBackground),
+        label = "print-page"
+    )
+    val renderBlock = remember(pageModel, renderer, isEditable, isDarkMode, unitConverter) {
         { drawScope: androidx.compose.ui.graphics.drawscope.DrawScope ->
             with(renderer) {
                 with(drawScope) {
                     val pageScale = min(
                         size.width / basePageWidthPx,
                         size.height / basePageHeightPx
-                    ) * scale
+                    )
 
                     withTransform({
                         scale(scaleX = pageScale, scaleY = pageScale, pivot = Offset.Zero)
@@ -114,8 +127,8 @@ fun PageView(
         val pageHeight = pageWidth / pageAspectRatio
         val pageWidthPx = with(density) { pageWidth.toPx() }
         val pageHeightPx = with(density) { pageHeight.toPx() }
-        val displayScale = remember(pageWidthPx, pageHeightPx, basePageWidthPx, basePageHeightPx, scale) {
-            min(pageWidthPx / basePageWidthPx, pageHeightPx / basePageHeightPx) * scale
+        val displayScale = remember(pageWidthPx, pageHeightPx, basePageWidthPx, basePageHeightPx) {
+            min(pageWidthPx / basePageWidthPx, pageHeightPx / basePageHeightPx)
         }
 
         Box(
@@ -126,7 +139,7 @@ fun PageView(
                 modifier = Modifier
                     .width(pageWidth)
                     .aspectRatio(pageAspectRatio),
-                color = if (isDarkMode) Color(0xFF202124) else Color.White,
+                color = pageColor,
                 shape = RectangleShape,
                 shadowElevation = 6.dp
             ) {
@@ -135,12 +148,12 @@ fun PageView(
                         renderBlock(this)
                     }
                     if (isEditable) {
-                        // Use new single-overlay approach (P0-2)
-                        EditableTextOverlay(
+                        EditablePrintOverlay(
                             pageElements = pageModel.elements,
                             pageScale = displayScale,
                             unitConverter = unitConverter,
-                            viewModel = viewModel
+                            viewModel = viewModel,
+                            tokens = tokens
                         )
                     }
                     Text(
@@ -149,7 +162,7 @@ fun PageView(
                             .align(Alignment.BottomCenter)
                             .padding(PaddingValues(bottom = 8.dp)),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isDarkMode) Color.White else Color.Black
+                        color = Color(tokens.secondaryText)
                     )
                 }
             }
@@ -162,7 +175,8 @@ private fun EditablePrintOverlay(
     pageElements: List<PositionedElement>,
     pageScale: Float,
     unitConverter: UnitConverter,
-    viewModel: EditorViewModel
+    viewModel: EditorViewModel,
+    tokens: DocumentColorTokens
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         pageElements.forEach { positionedElement ->
@@ -171,6 +185,7 @@ private fun EditablePrintOverlay(
                     positionedElement = positionedElement,
                     pageScale = pageScale,
                     unitConverter = unitConverter,
+                    tokens = tokens,
                     onValueChange = { viewModel.updateParagraphById(positionedElement.elementId, it) }
                 )
                 is DocumentElement.SectionHeader -> EditableHeaderBlock(
@@ -178,6 +193,7 @@ private fun EditablePrintOverlay(
                     positionedElement = positionedElement,
                     pageScale = pageScale,
                     unitConverter = unitConverter,
+                    tokens = tokens,
                     onValueChange = { viewModel.updateSectionHeaderById(positionedElement.elementId, it) }
                 )
                 else -> Unit
@@ -191,29 +207,42 @@ private fun EditableParagraphBlock(
     positionedElement: PositionedElement,
     pageScale: Float,
     unitConverter: UnitConverter,
+    tokens: DocumentColorTokens,
     onValueChange: (androidx.compose.ui.text.AnnotatedString) -> Unit
 ) {
     val paragraph = positionedElement.element as? DocumentElement.Paragraph ?: return
+    val currentAnnotatedString = paragraph.toAnnotatedString()
+    var fieldValue by remember(paragraph.id) { mutableStateOf(TextFieldValue(currentAnnotatedString)) }
+    androidx.compose.runtime.LaunchedEffect(currentAnnotatedString) {
+        if (fieldValue.annotatedString != currentAnnotatedString) {
+            val oldText = fieldValue.text
+            val selection = fieldValue.selection
+            val sameEdit = oldText == currentAnnotatedString.text
+            fieldValue = TextFieldValue(
+                annotatedString = currentAnnotatedString,
+                selection = if (sameEdit) selection else androidx.compose.ui.text.TextRange(currentAnnotatedString.length)
+            )
+        }
+    }
     val density = LocalDensity.current
     val xDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.left) * pageScale).toDp() }
     val yDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.top) * pageScale).toDp() }
     val widthDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.width()) * pageScale).toDp() }
     val heightDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.height()) * pageScale).toDp() }
 
-    TextField(
-        value = androidx.compose.ui.text.input.TextFieldValue(paragraph.toAnnotatedString()),
-        onValueChange = { onValueChange(it.annotatedString) },
+    BasicTextField(
+        value = fieldValue,
+        onValueChange = {
+            fieldValue = it
+            onValueChange(it.annotatedString)
+        },
         modifier = Modifier
             .offset { IntOffset(xDp.roundToPx(), yDp.roundToPx()) }
             .width(widthDp)
             .height(heightDp),
-        textStyle = MaterialTheme.typography.bodyMedium,
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = Color.White,
-            unfocusedContainerColor = Color.White,
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent
-        )
+        textStyle = TextStyle(color = Color(tokens.contentText)),
+        singleLine = false,
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
     )
 }
 
@@ -223,8 +252,13 @@ private fun EditableHeaderBlock(
     positionedElement: PositionedElement,
     pageScale: Float,
     unitConverter: UnitConverter,
+    tokens: DocumentColorTokens,
     onValueChange: (String) -> Unit
 ) {
+    var fieldValue by remember(element.id) { mutableStateOf(element.text) }
+    if (fieldValue != element.text && fieldValue.length != element.text.length) {
+        fieldValue = element.text
+    }
     val density = LocalDensity.current
     val xDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.left) * pageScale).toDp() }
     val yDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.top) * pageScale).toDp() }
@@ -235,18 +269,16 @@ private fun EditableHeaderBlock(
         else -> MaterialTheme.typography.titleMedium
     }
 
-    TextField(
-        value = element.text,
-        onValueChange = onValueChange,
+    BasicTextField(
+        value = fieldValue,
+        onValueChange = {
+            fieldValue = it
+            onValueChange(it)
+        },
         modifier = Modifier
             .offset { IntOffset(xDp.roundToPx(), yDp.roundToPx()) }
             .width(widthDp),
-        textStyle = textStyle,
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = Color.White,
-            unfocusedContainerColor = Color.White,
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent
-        )
+        textStyle = textStyle.copy(color = Color(tokens.contentText)),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
     )
 }

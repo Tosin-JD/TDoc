@@ -22,10 +22,10 @@ data class PageDimensions(
     val printableHeight: Float get() = height - marginTop - marginBottom
 
     /** Top of body content (below margin + header reservation) */
-    val bodyTop: Float get() = marginTop + headerHeight
+    val bodyTop: Float get() = maxOf(marginTop, headerEdgePt + headerHeight)
 
     /** Bottom of body content (above margin + footer reservation) */
-    val bodyBottom: Float get() = height - marginBottom - footerHeight
+    val bodyBottom: Float get() = minOf(height - marginBottom, height - footerEdgePt - footerHeight)
 
     /** Usable body height after header/footer reservation */
     val bodyHeight: Float get() = bodyBottom - bodyTop
@@ -60,6 +60,7 @@ data class PageDimensions(
     companion object {
         val Letter = PageDimensions(width = 612f, height = 792f)
         val A4 = PageDimensions(width = 595.27f, height = 841.89f)
+        val Default = A4
         val Legal = PageDimensions(width = 612f, height = 1008f)
         val Executive = PageDimensions(width = 540f, height = 720f)
     }

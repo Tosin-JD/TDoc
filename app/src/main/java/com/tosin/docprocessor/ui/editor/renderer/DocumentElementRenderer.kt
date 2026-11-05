@@ -14,37 +14,38 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.ParagraphStyle
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tosin.docprocessor.domain.model.DocumentElement
-import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
-import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import com.tosin.docprocessor.ui.components.ImageWidget
 import com.tosin.docprocessor.ui.components.TableWidget
 import com.tosin.docprocessor.ui.editor.EditorViewModel
+import com.tosin.docprocessor.ui.theme.LocalAppIsDarkTheme
 
+/**
+ * Maps one body [DocumentElement] to Compose for the mobile reading surface.
+ *
+ * Which elements reach this composable is decided by `MobileContentPolicy`;
+ * section setup, page breaks, header/footer stories and metadata records are
+ * never body text here. Colours come from the one resolved app theme.
+ */
 @Composable
 fun DocumentElementRenderer(
     element: DocumentElement,
     index: Int,
     viewModel: EditorViewModel,
-    isEditable: Boolean,
-    isDarkMode: Boolean = false
+    isEditable: Boolean
 ) {
+    val isDarkMode = LocalAppIsDarkTheme.current
     when (element) {
         is DocumentElement.Paragraph -> {
             val textStyleMapper = remember { DocumentTextStyleMapper() }
@@ -54,14 +55,30 @@ fun DocumentElementRenderer(
             val textModel = remember(element, baseStyle, isDarkMode) {
                 textStyleMapper.map(element, baseStyle, isDarkMode)
             }
+            var fieldValue by remember(element.id) {
+                mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(textModel.text))
+            }
+            LaunchedEffect(textModel.text) {
+                if (fieldValue.annotatedString != textModel.text) {
+                    fieldValue = fieldValue.copy(annotatedString = textModel.text)
+                }
+            }
             if (isEditable) {
                 TextField(
-                    value = androidx.compose.ui.text.input.TextFieldValue(textModel.text),
-                    onValueChange = { viewModel.updateParagraph(index, it.annotatedString) },
+                    value = fieldValue,
+                    onValueChange = {
+                        fieldValue = it
+                        viewModel.updateParagraph(index, it.annotatedString)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    textStyle = textModel.textStyle,
+                        .padding(
+                            start = textModel.indentStart,
+                            end = textModel.indentEnd,
+                            top = 4.dp + textModel.spaceBefore,
+                            bottom = 4.dp + textModel.spaceAfter
+                        ),
+                    textStyle = textModel.textStyle.copy(textAlign = textModel.textAlign),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,
@@ -87,15 +104,14 @@ fun DocumentElementRenderer(
         }
 
         is DocumentElement.Table -> {
-            TableWidget(table = element, isDarkMode = isDarkMode)
+            TableWidget(table = element)
         }
 
         is DocumentElement.Image -> {
             ImageWidget(
                 sourceUri = element.sourceUri,
                 caption = element.caption,
-                altText = element.altText,
-                isDarkMode = isDarkMode
+                altText = element.altText
             )
         }
 
@@ -108,6 +124,9 @@ fun DocumentElementRenderer(
             val textStyle = baseStyle.copy(
                 color = MaterialTheme.colorScheme.onSurface
             )
+            // Expose heading levels to assistive technology so long documents
+            // can be navigated by structure.
+            val headingModifier = Modifier.semantics { heading() }
             if (isEditable) {
                 TextField(
                     value = element.text,
@@ -127,49 +146,33 @@ fun DocumentElementRenderer(
                 Text(
                     text = element.text,
                     style = textStyle,
-                    modifier = Modifier.padding(vertical = 8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .then(headingModifier)
                 )
             }
         }
 
-        is DocumentElement.Section -> MetadataText(element.properties.toString(), isDarkMode)
+        // Control data and metadata records: deliberately not rendered as text.
+        is DocumentElement.Section,
+        is DocumentElement.HeaderFooter,
+        is DocumentElement.Comment,
+        is DocumentElement.Bookmark,
+        is DocumentElement.Field,
+        is DocumentElement.Metadata,
+        is DocumentElement.Note,
+        is DocumentElement.PageBreak -> Unit
 
-        is DocumentElement.HeaderFooter -> MetadataText(
-            "${element.content.kind.name.lowercase()} (${element.content.variant}): ${element.content.text}",
-            isDarkMode
+        is DocumentElement.Drawing -> UnsupportedPlaceholder(
+            kind = element.info.kind,
+            description = "This drawing is preserved but cannot be displayed in mobile view."
         )
-
-        is DocumentElement.Note -> MetadataText("${element.info.kind.name.lowercase()}: ${element.info.text}", isDarkMode)
-
-        is DocumentElement.Comment -> MetadataText("comment by ${element.info.author ?: "unknown"}: ${element.info.text}", isDarkMode)
-
-        is DocumentElement.Bookmark -> MetadataText(
-            "bookmark ${element.info.boundary.name.lowercase()}: ${element.info.name.ifBlank { element.info.id }}",
-            isDarkMode
-        )
-
-        is DocumentElement.Field -> MetadataText("field ${element.info.type}: ${element.info.instruction}", isDarkMode)
-
-        is DocumentElement.Metadata -> MetadataText(
-            buildString {
-                append(element.info.title ?: element.info.kind)
-                append(": ")
-                append(element.info.summary)
-            },
-            isDarkMode
-        )
-
-        is DocumentElement.Drawing -> MetadataText("drawing: ${element.info.kind}")
 
         is DocumentElement.EmbeddedObject -> UnsupportedPlaceholder(
             kind = element.info.programId ?: element.info.kind,
-            description = element.info.description,
-            isDarkMode = isDarkMode
+            description = element.info.description
         )
-
-        is DocumentElement.PageBreak -> {
-            Text(text = "", modifier = Modifier.padding(vertical = 12.dp))
-        }
     }
 }
 
@@ -180,16 +183,18 @@ fun DocumentElementRenderer(
 @Composable
 private fun UnsupportedPlaceholder(
     kind: String,
-    description: String?,
-    isDarkMode: Boolean
+    description: String?
 ) {
+    val isDarkMode = LocalAppIsDarkTheme.current
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isDarkMode) 0.5f else 1f),
-        tonalElevation = 1.dp
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(
+            alpha = if (isDarkMode) 0.9f else 1f
+        ),
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -215,14 +220,4 @@ private fun UnsupportedPlaceholder(
             }
         }
     }
-}
-
-@Composable
-private fun MetadataText(text: String, isDarkMode: Boolean = false) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall,
-        color = if (isDarkMode) Color.LightGray else Color.Gray,
-        modifier = Modifier.padding(vertical = 4.dp)
-    )
 }

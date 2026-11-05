@@ -3,17 +3,15 @@ package com.tosin.docprocessor.ui.print
 import android.content.Context
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
-import com.tosin.docprocessor.core.rendering.PrintElementRenderer
 import com.tosin.docprocessor.domain.model.layout.PageModel
-import com.tosin.docprocessor.domain.pagination.UnitConverter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
 
 class PdfExporter(
     private val context: Context,
-    private val unitConverter: UnitConverter,
-    private val renderer: PrintElementRenderer
+    @Suppress("UNUSED_PARAMETER") unitConverter: com.tosin.docprocessor.domain.pagination.UnitConverter,
+    @Suppress("UNUSED_PARAMETER") renderer: com.tosin.docprocessor.core.rendering.PrintElementRenderer
 ) {
     suspend fun exportToUri(pages: List<PageModel>, uri: Uri, documentName: String = "document"): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -22,8 +20,8 @@ class PdfExporter(
                 outputStream?.use { out ->
                     val pdfDocument = PdfDocument()
                     pages.forEachIndexed { index, page ->
-                        val width = unitConverter.ptToPx(page.dimensions.width).toInt()
-                        val height = unitConverter.ptToPx(page.dimensions.height).toInt()
+                        val width = page.dimensions.width.toInt().coerceAtLeast(1)
+                        val height = page.dimensions.height.toInt().coerceAtLeast(1)
                         val pageInfo = PdfDocument.PageInfo.Builder(width, height, index + 1).create()
                         val pdfPage = pdfDocument.startPage(pageInfo)
                         val canvas = pdfPage.canvas

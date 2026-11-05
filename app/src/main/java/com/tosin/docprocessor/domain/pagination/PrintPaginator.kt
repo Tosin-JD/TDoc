@@ -38,7 +38,7 @@ class PrintPaginator(
     private data class PaginationState(
         var currentPageIndex: Int = 0,
         var currentY: Float = 0f,
-        var currentDimensions: PageDimensions = PageDimensions(),
+        var currentDimensions: PageDimensions = PageDimensions.Default,
         var currentPageElements: MutableList<PositionedElement> = mutableListOf(),
         val pages: MutableList<PageModel> = mutableListOf(),
         val sectionStartPages: MutableSet<Int> = mutableSetOf(0)
@@ -132,10 +132,10 @@ class PrintPaginator(
     ): PageDimensions {
         if (headers.isEmpty() && footers.isEmpty()) return dimensions
 
-        val headerHeightPt = headers.firstOrNull()?.let {
+        val headerHeightPt = headers.maxOfOrNull {
             textMeasurer.measurePlainText(it.content.text, fontSize = 10f, widthPt = dimensions.printableWidth)
         } ?: 0f
-        val footerHeightPt = footers.firstOrNull()?.let {
+        val footerHeightPt = footers.maxOfOrNull {
             textMeasurer.measurePlainText(it.content.text, fontSize = 10f, widthPt = dimensions.printableWidth)
         } ?: 0f
 
@@ -345,7 +345,7 @@ class PrintPaginator(
 
         val charAtLineEnd = textMeasurer.getLineEnd(fullLayout, adjustedLine)
         val (spans1, spans2) = splitSpans(element.renderSpans(), charAtLineEnd)
-        val fragment1 = element.copy(spans = spans1, listLabel = null).takeIf { it.spans.isNotEmpty() }
+        val fragment1 = element.copy(spans = spans1).takeIf { it.spans.isNotEmpty() }
         val fragment2 = element.copy(spans = spans2, listLabel = null).takeIf { it.spans.isNotEmpty() }
         return Pair(fragment1, fragment2)
     }
@@ -696,7 +696,7 @@ class PrintPaginator(
             val gridSum = element.gridColumnWidthsPt.sum()
             if (gridSum > 0f) {
                 val scale = effectiveWidth / gridSum
-                element.gridColumnWidthsPt.map { (it * scale).coerceAtLeast(minTableColumnWidthPt) }
+                allocateColumnWidths(element.gridColumnWidthsPt.map { it * scale }, effectiveWidth)
             } else {
                 calculateColumnWidths(element.rows, effectiveWidth, columnCount)
             }
@@ -756,21 +756,17 @@ class PrintPaginator(
             }
         }
 
-        val totalWeight = rawWeights.sum().takeIf { it > 0f } ?: columnCount.toFloat()
-        val initialWidths = rawWeights.map { weight ->
-            maxOf(minTableColumnWidthPt, totalWidthPt * (weight / totalWeight))
-        }.toMutableList()
+        return allocateColumnWidths(rawWeights, totalWidthPt)
+    }
 
-        val widthSum = initialWidths.sum()
-        if (widthSum == totalWidthPt) return initialWidths
-
-        val scale = totalWidthPt / widthSum
-        val normalized = initialWidths.map { it * scale }.toMutableList()
-        val normalizedSum = normalized.sum()
-        if (normalized.isNotEmpty()) {
-            normalized[normalized.lastIndex] += totalWidthPt - normalizedSum
-        }
-        return normalized
+    private fun allocateColumnWidths(weights: List<Float>, totalWidthPt: Float): List<Float> {
+        if (weights.isEmpty()) return emptyList()
+        val minimum = minTableColumnWidthPt.coerceAtMost(totalWidthPt / weights.size)
+        val weightSum = weights.sum().takeIf { it > 0f } ?: weights.size.toFloat()
+        val remaining = (totalWidthPt - minimum * weights.size).coerceAtLeast(0f)
+        val widths = weights.map { minimum + remaining * (it.coerceAtLeast(0f) / weightSum) }.toMutableList()
+        widths[widths.lastIndex] += totalWidthPt - widths.sum()
+        return widths
     }
 
     private fun estimateColumnWeight(text: String): Float {
