@@ -127,7 +127,7 @@ fun PrintLayout(
             val firstElementId = page.elements.firstOrNull()?.elementId ?: ""
             val contentHash = page.elements.fold(0) { acc, elem -> acc + elem.elementId.hashCode() }
             page.copy(
-                stableKey = "${firstElementId}_${contentHash}_${idx}",
+                stableKey = "${firstElementId}_${idx}",
                 documentFingerprint = documentData.hashCode().toLong()
             )
         }
@@ -170,9 +170,13 @@ fun PrintLayout(
         modifier = Modifier
             .fillMaxSize()
             .background(canvasColor)
-            .pointerInput(Unit) {
+            .pointerInput(isEditable) {
                 detectTapGestures(
                     onDoubleTap = {
+                        if (!isEditable) {
+                            viewModel.enterEditMode()
+                            return@detectTapGestures
+                        }
                         val target = if (zoomScale > 1.2f) 1f else 1.25f
                         coroutineScope.launch {
                             zoomAnimatable.snapTo(zoomScale)

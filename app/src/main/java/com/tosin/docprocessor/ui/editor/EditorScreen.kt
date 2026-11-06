@@ -198,7 +198,7 @@ fun EditorScreen(
                 TopAppBar(
                     title = { /* Empty title in edit mode or as needed */ },
                     navigationIcon = {
-                        IconButton(onClick = { viewModel.toggleEditorMode() }) {
+                        IconButton(onClick = { viewModel.saveEditsAndExitEditMode() }, enabled = !uiState.isSaving) {
                             Icon(Icons.Default.Check, contentDescription = "Finish Editing", tint = MaterialTheme.colorScheme.primary)
                         }
                     },
@@ -245,7 +245,7 @@ fun EditorScreen(
         floatingActionButton = {
             if (uiState.editorMode == EditorMode.PREVIEW) {
                 FloatingActionButton(
-                    onClick = { viewModel.toggleEditorMode() },
+                    onClick = { viewModel.enterEditMode() },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ) {

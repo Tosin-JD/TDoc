@@ -58,8 +58,8 @@ fun DocumentElementRenderer(
             var fieldValue by remember(element.id) {
                 mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(textModel.text))
             }
-            LaunchedEffect(textModel.text) {
-                if (fieldValue.annotatedString != textModel.text) {
+            LaunchedEffect(element.id, isEditable) {
+                if (!isEditable && fieldValue.annotatedString != textModel.text) {
                     fieldValue = fieldValue.copy(annotatedString = textModel.text)
                 }
             }
@@ -127,10 +127,16 @@ fun DocumentElementRenderer(
             // Expose heading levels to assistive technology so long documents
             // can be navigated by structure.
             val headingModifier = Modifier.semantics { heading() }
+            var headerValue by remember(element.id) {
+                mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(element.text))
+            }
             if (isEditable) {
                 TextField(
-                    value = element.text,
-                    onValueChange = { viewModel.updateSectionHeader(index, it) },
+                    value = headerValue,
+                    onValueChange = {
+                        headerValue = it
+                        viewModel.updateSectionHeader(index, it.text)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp),

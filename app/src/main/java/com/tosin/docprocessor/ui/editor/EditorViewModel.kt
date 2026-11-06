@@ -81,6 +81,46 @@ class EditorViewModel @Inject constructor(
         )
     }
 
+    fun enterEditMode() {
+        if (_uiState.value.editorMode != EditorMode.EDIT) {
+            _uiState.value = _uiState.value.copy(editorMode = EditorMode.EDIT)
+        }
+    }
+
+    fun saveEditsAndExitEditMode() {
+        val state = _uiState.value
+        if (state.editorMode != EditorMode.EDIT || state.isSaving) return
+        val uri = currentUri
+        if (uri == null) {
+            _uiState.value = state.copy(errorMessage = "No file to save. Use Save As first.")
+            viewModelScope.launch { _events.emit("No file to save. Use Save As first.") }
+            return
+        }
+        val content = documentElements.toList()
+        _uiState.value = state.copy(isSaving = true, errorMessage = null)
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { documentRepository.saveDocumentToUri(uri, content) }
+                documentElements = content
+                val savedDocument = _currentDocument.value?.copy(content = content)
+                _currentDocument.value = savedDocument
+                _uiState.value = _uiState.value.copy(
+                    documentData = savedDocument,
+                    editorMode = EditorMode.PREVIEW,
+                    activeEditingElementId = null,
+                    errorMessage = null
+                )
+                _events.emit("File saved successfully!")
+            } catch (e: Exception) {
+                val message = e.localizedMessage ?: "Unable to save file"
+                _uiState.value = _uiState.value.copy(errorMessage = message)
+                _events.emit("Save failed: $message")
+            } finally {
+                _uiState.value = _uiState.value.copy(isSaving = false)
+            }
+        }
+    }
+
     fun toggleStarred() {
         _uiState.value = _uiState.value.copy(isStarred = !_uiState.value.isStarred)
     }

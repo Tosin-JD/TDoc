@@ -2,6 +2,7 @@ package com.tosin.docprocessor.ui.editor.layouts
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
@@ -86,7 +88,10 @@ fun MobileLayout(
                     .widthIn(max = 840.dp)
                     .fillMaxWidth()
                     .fillMaxHeight()
-                    .focusRequester(focusRequester),
+                    .focusRequester(focusRequester)
+                    .pointerInput(isEditable) {
+                        if (!isEditable) detectTapGestures(onDoubleTap = { viewModel.enterEditMode() })
+                    },
                 contentPadding = PaddingValues(
                     start = horizontalPadding,
                     end = horizontalPadding,
