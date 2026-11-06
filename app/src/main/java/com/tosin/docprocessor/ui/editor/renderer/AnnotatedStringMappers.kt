@@ -111,6 +111,33 @@ object AnnotatedStringMappers {
         return mapped
     }
 
+    fun splitSpans(
+        spans: List<TextSpan>,
+        splitCharPosition: Int
+    ): Pair<List<TextSpan>, List<TextSpan>> {
+        val spans1 = mutableListOf<TextSpan>()
+        val spans2 = mutableListOf<TextSpan>()
+
+        var charCount = 0
+        for (span in spans) {
+            val spanEnd = charCount + span.text.length
+
+            when {
+                spanEnd <= splitCharPosition -> spans1.add(span)
+                charCount >= splitCharPosition -> spans2.add(span)
+                else -> {
+                    val splitInSpan = splitCharPosition - charCount
+                    spans1.add(span.copy(text = span.text.substring(0, splitInSpan)))
+                    spans2.add(span.copy(text = span.text.substring(splitInSpan)))
+                }
+            }
+
+            charCount = spanEnd
+        }
+
+        return Pair(spans1, spans2)
+    }
+
     private fun originalSpanAt(spans: List<TextSpan>, index: Int): TextSpan {
         var current = 0
         spans.forEach { span ->

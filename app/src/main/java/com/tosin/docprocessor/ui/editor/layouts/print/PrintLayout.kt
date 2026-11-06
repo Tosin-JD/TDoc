@@ -1,7 +1,12 @@
 package com.tosin.docprocessor.ui.editor.layouts.print
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,16 +15,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.core.color.DocumentColorTokens
@@ -39,8 +50,8 @@ import com.tosin.docprocessor.ui.editor.EditorViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
 
 @Composable
 fun PrintLayout(
@@ -72,6 +83,7 @@ fun PrintLayout(
     )
 
     val currentDocument by viewModel.currentDocument.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
     val documentData = remember(currentDocument, viewModel.documentElements) {
         currentDocument?.copy(content = viewModel.documentElements)
             ?: DocumentData(content = viewModel.documentElements)
@@ -79,19 +91,36 @@ fun PrintLayout(
 
     val pagesState = remember { mutableStateOf<List<PageModel>>(emptyList()) }
     val pages = pagesState.value
-    
-    LaunchedEffect(documentData, isDarkMode) {
-        delay(200)
+
+    var zoomScale by remember { mutableFloatStateOf(1f) }
+    var panOffset by remember { mutableStateOf(Offset.Zero) }
+    val coroutineScope = rememberCoroutineScope()
+    val zoomAnimatable = remember { Animatable(1f) }
+
+    // Auto-focus zoom to 1.25f when entering edit on an element
+    LaunchedEffect(uiState.activeEditingElementId) {
+        if (uiState.activeEditingElementId != null && zoomScale < 1.25f) {
+            coroutineScope.launch {
+                zoomAnimatable.snapTo(zoomScale)
+                zoomAnimatable.animateTo(1.25f, animationSpec = tween(300))
+                zoomScale = zoomAnimatable.value
+                viewModel.setZoomScale(zoomScale)
+            }
+        }
+    }
+
+    // Debounced pagination (300 ms) to avoid thrashing on keystrokes
+    LaunchedEffect(documentData) {
+        delay(300)
         val result = withContext(Dispatchers.Default) {
             val sections = documentData.content.filterIsInstance<DocumentElement.Section>()
             val defaultDimensions = if (sections.isNotEmpty()) {
-                // Use first section as base; paginator will handle subsequent sections
                 sectionResolver.resolve(sections.first().properties)
             } else {
-                    PageDimensions.Default
+                PageDimensions.Default
             }
 
-            paginator.paginate(documentData, defaultDimensions, isDarkMode = isDarkMode)
+            paginator.paginate(documentData, defaultDimensions)
         }
         // Generate stable keys for pages
         val pagesWithKeys = result.mapIndexed { idx, page ->
@@ -112,22 +141,61 @@ fun PrintLayout(
                 (minOf(item.offset + item.size, layoutInfo.viewportEndOffset) -
                     maxOf(item.offset, layoutInfo.viewportStartOffset)).coerceAtLeast(0)
             }
-            mostVisibleItem?.index?.plus(1) to pages.size.coerceAtLeast(1)
+            mostVisibleItem?.index?.plus(1) to pages.size
         }
             .distinctUntilChanged()
             .collect { (currentPage, pageCount) ->
-                viewModel.onPrintPageChanged(currentPage ?: 1, pageCount)
+                if (pageCount > 0) {
+                    viewModel.onPrintPageChanged(currentPage ?: 1, pageCount)
+                }
             }
+    }
+
+    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        val newScale = (zoomScale * zoomChange).coerceIn(0.5f, 2.5f)
+        zoomScale = newScale
+        viewModel.setZoomScale(newScale)
+        panOffset = if (newScale > 1f) {
+            val maxPan = 400f * (newScale - 1f)
+            Offset(
+                x = (panOffset.x + panChange.x).coerceIn(-maxPan, maxPan),
+                y = (panOffset.y + panChange.y).coerceIn(-maxPan, maxPan)
+            )
+        } else {
+            Offset.Zero
+        }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(canvasColor),
+            .background(canvasColor)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        val target = if (zoomScale > 1.2f) 1f else 1.25f
+                        coroutineScope.launch {
+                            zoomAnimatable.snapTo(zoomScale)
+                            zoomAnimatable.animateTo(target, animationSpec = tween(250))
+                            zoomScale = zoomAnimatable.value
+                            panOffset = Offset.Zero
+                            viewModel.setZoomScale(target)
+                        }
+                    }
+                )
+            }
+            .transformable(state = transformState),
         contentAlignment = Alignment.TopCenter
     ) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = zoomScale
+                    scaleY = zoomScale
+                    translationX = panOffset.x
+                    translationY = panOffset.y
+                },
             state = listState,
             contentPadding = PaddingValues(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),

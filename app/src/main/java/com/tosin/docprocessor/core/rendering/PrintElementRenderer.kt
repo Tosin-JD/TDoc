@@ -23,6 +23,7 @@ class PrintElementRenderer(
     fun DrawScope.render(
         positionedElement: PositionedElement,
         renderTextContent: Boolean = true,
+        activeEditingElementId: String? = null,
         isDarkMode: Boolean = false
     ) {
         val bounds = positionedElement.bounds
@@ -32,18 +33,24 @@ class PrintElementRenderer(
         val height = unitConverter.ptToPx(bounds.height())
         val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
 
+        val isBeingEdited = activeEditingElementId != null && (
+            positionedElement.elementId == activeEditingElementId ||
+            positionedElement.logicalElementId == activeEditingElementId
+        )
+        val shouldRenderText = renderTextContent && !isBeingEdited
+
         when (val element = positionedElement.element) {
             is DocumentElement.Image ->
                 renderImage(element, positionedElement.layoutResult, x, y, width, height, tokens)
             is DocumentElement.Table ->
                 renderTable(element, positionedElement.layoutResult, x, y, width, height, tokens)
             is DocumentElement.HeaderFooter -> {
-                if (renderTextContent) {
+                if (shouldRenderText) {
                     renderHeaderFooter(element, positionedElement.layoutResult, x, y, width, height, tokens)
                 }
             }
             else -> {
-                if (renderTextContent) {
+                if (shouldRenderText) {
                     renderTextOrPlaceholder(positionedElement.layoutResult, x, y, width, height, tokens)
                 }
             }

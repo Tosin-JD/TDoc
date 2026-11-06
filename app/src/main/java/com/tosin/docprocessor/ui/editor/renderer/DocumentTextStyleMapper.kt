@@ -44,26 +44,33 @@ class DocumentTextStyleMapper(
     fun map(
         paragraph: DocumentElement.Paragraph,
         baseStyle: TextStyle,
-        isDarkMode: Boolean
+        isDarkMode: Boolean,
+        scale: Float = 1f,
+        includeListLabel: Boolean = true
     ): ParagraphTextModel {
         val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
-        val baseSizeSp = baseStyle.fontSize.value.let { if (it.isFinite()) it else DEFAULT_FONT_SIZE_SP }
-        val maxSizeSp = paragraph.spans
+        val rawBase = baseStyle.fontSize.value.let { if (it.isFinite()) it else DEFAULT_FONT_SIZE_SP }
+        val baseSizeSp = rawBase * scale
+        val rawMax = paragraph.spans
             .mapNotNull { it.fontSize?.toFloat() }
             .maxOrNull()
-            ?.coerceAtLeast(baseSizeSp)
-            ?: baseSizeSp
-        val lineHeightSp = flowResolver.effectiveLineHeightPt(
+            ?.coerceAtLeast(rawBase)
+            ?: rawBase
+        val maxSizeSp = rawMax * scale
+        val rawLineHeight = flowResolver.effectiveLineHeightPt(
             spacing = paragraph.style.spacing,
-            baseFontSizePt = baseSizeSp,
-            maxFontSizePt = maxSizeSp
+            baseFontSizePt = rawBase,
+            maxFontSizePt = rawMax
         )
+        val lineHeightSp = rawLineHeight * scale
 
+        val rawIndentFirst = (paragraph.style.indentation.firstLine
+            ?: paragraph.style.indentation.hanging?.let { -it })?.twipsToSp() ?: 0.sp
         val textStyle = baseStyle.copy(
+            fontSize = baseSizeSp.sp,
             lineHeight = lineHeightSp.sp,
             textIndent = TextIndent(
-                firstLine = (paragraph.style.indentation.firstLine
-                    ?: paragraph.style.indentation.hanging?.let { -it })?.twipsToSp() ?: 0.sp,
+                firstLine = rawIndentFirst * scale,
                 restLine = 0.sp
             ),
             platformStyle = PlatformTextStyle(includeFontPadding = false),
@@ -74,14 +81,16 @@ class DocumentTextStyleMapper(
         )
 
         val annotated = buildAnnotatedString {
-            paragraph.listLabel?.let { label ->
-                withStyle(SpanStyle(color = Color(tokens.contentText))) {
-                    append(label)
-                    append(" ")
+            if (includeListLabel) {
+                paragraph.listLabel?.let { label ->
+                    withStyle(SpanStyle(color = Color(tokens.contentText), fontSize = baseSizeSp.sp)) {
+                        append(label)
+                        append(" ")
+                    }
                 }
             }
             paragraph.spans.forEach { span ->
-                withStyle(span.toSpanStyle(tokens, isDarkMode)) { append(span.text) }
+                withStyle(span.toSpanStyle(tokens, isDarkMode, scale)) { append(span.text) }
             }
         }
 
@@ -89,14 +98,14 @@ class DocumentTextStyleMapper(
             text = annotated,
             textStyle = textStyle,
             textAlign = paragraph.style.alignment.toTextAlign(),
-            indentStart = paragraph.style.indentation.left.twipsToDp(),
-            indentEnd = paragraph.style.indentation.right.twipsToDp(),
-            spaceBefore = paragraph.style.spacing.before.twipsToDp(),
-            spaceAfter = paragraph.style.spacing.after.twipsToDp()
+            indentStart = paragraph.style.indentation.left.twipsToDp() * scale,
+            indentEnd = paragraph.style.indentation.right.twipsToDp() * scale,
+            spaceBefore = paragraph.style.spacing.before.twipsToDp() * scale,
+            spaceAfter = paragraph.style.spacing.after.twipsToDp() * scale
         )
     }
 
-    private fun TextSpan.toSpanStyle(tokens: DocumentColorTokens, isDarkMode: Boolean): SpanStyle {
+    private fun TextSpan.toSpanStyle(tokens: DocumentColorTokens, isDarkMode: Boolean, scale: Float): SpanStyle {
         val resolvedColor = Color(DocumentTextColorResolver.resolveTextColor(color, tokens, isDarkMode))
         val background = highlightColor
             ?.let { DocumentTextColorResolver.parseColorString(it) }
@@ -116,10 +125,10 @@ class DocumentTextStyleMapper(
             fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
             fontStyle = if (isItalic) FontStyle.Italic else FontStyle.Normal,
             fontFamily = fontResolver.resolve(fontFamily).toComposeFontFamily(),
-            fontSize = fontSize?.sp ?: androidx.compose.ui.unit.TextUnit.Unspecified,
+            fontSize = fontSize?.let { (it * scale).sp } ?: androidx.compose.ui.unit.TextUnit.Unspecified,
             textDecoration = decoration,
             background = background,
-            letterSpacing = characterSpacing?.let { (it / TWIPS_PER_POINT).sp }
+            letterSpacing = characterSpacing?.let { ((it / TWIPS_PER_POINT) * scale).sp }
                 ?: androidx.compose.ui.unit.TextUnit.Unspecified,
             baselineShift = when {
                 isSuperscript -> BaselineShift.Superscript

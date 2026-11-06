@@ -14,7 +14,12 @@ data class PositionedElement(
     val bounds: RectF,           // X, Y, Width, Height in Points relative to Page (0,0)
     val indentation: ElementIndentation = ElementIndentation(),
     val metadata: Map<String, Any> = emptyMap(), // For things like "Split across pages" (lineStart, lineEnd)
-    val layoutResult: LayoutResult = LayoutResult.Empty
+    val layoutResult: LayoutResult = LayoutResult.Empty,
+    val logicalElementId: String = elementId,
+    val fragmentIndex: Int = 0,
+    val isFragment: Boolean = false,
+    val charStart: Int = 0,
+    val charEnd: Int = 0
 )
 
 /**

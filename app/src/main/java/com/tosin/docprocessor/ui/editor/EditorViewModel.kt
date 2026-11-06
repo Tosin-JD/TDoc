@@ -181,6 +181,58 @@ class EditorViewModel @Inject constructor(
         }
     }
 
+    fun setActiveEditingElement(elementId: String?) {
+        if (_uiState.value.activeEditingElementId != elementId) {
+            _uiState.value = _uiState.value.copy(activeEditingElementId = elementId)
+        }
+    }
+
+    fun setZoomScale(scale: Float) {
+        val clamped = scale.coerceIn(0.5f, 2.5f)
+        if (_uiState.value.zoomScale != clamped) {
+            _uiState.value = _uiState.value.copy(zoomScale = clamped)
+        }
+    }
+
+    fun updateParagraphFragment(
+        logicalId: String,
+        fragmentIndex: Int,
+        isFragment: Boolean,
+        charStart: Int,
+        charEnd: Int,
+        updatedFragmentContent: AnnotatedString
+    ) {
+        if (_uiState.value.editorMode != EditorMode.EDIT) return
+
+        val currentList = documentElements.toMutableList()
+        val index = currentList.indexOfFirst { it.id == logicalId }
+        if (index < 0) return
+
+        val element = currentList[index]
+        if (element !is DocumentElement.Paragraph) return
+
+        if (!isFragment || (charStart == 0 && charEnd == 0)) {
+            updateParagraph(index, updatedFragmentContent)
+            return
+        }
+
+        val masterSpans = element.spans
+        val (prefixSpans, fromStart) = AnnotatedStringMappers.splitSpans(masterSpans, charStart)
+        val fragmentLength = (charEnd - charStart).coerceAtLeast(0)
+        val (targetFragmentSpans, suffixSpans) = AnnotatedStringMappers.splitSpans(fromStart, fragmentLength)
+
+        val newFragmentSpans = AnnotatedStringMappers.toTextSpans(
+            annotatedString = updatedFragmentContent,
+            originalSpans = targetFragmentSpans,
+            listLabel = if (charStart == 0) element.listLabel else null
+        )
+
+        val mergedSpans = prefixSpans + newFragmentSpans + suffixSpans
+        currentList[index] = element.copy(spans = mergedSpans)
+        documentElements = currentList
+        syncDocumentState()
+    }
+
     fun updateParagraphById(elementId: String, newContent: AnnotatedString) {
         val index = documentElements.indexOfFirst { it.id == elementId }
         if (index >= 0) {

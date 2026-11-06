@@ -218,21 +218,31 @@ class PrintPaginator(
             }
         }
 
+        val originalLogicalId = element.id
+        var fragmentIndex = 0
+        var accumulatedCharOffset = 0
         var pending: DocumentElement? = element
 
         while (pending != null) {
             val currentElement = pending
             val elementHeight = measureElement(currentElement, dimensions)
             val availableSpace = dimensions.bodyHeight - (state.currentY - dimensions.bodyTop)
+            val isSplitFragment = fragmentIndex > 0
 
             if (elementHeight <= availableSpace) {
+                val elementCharCount = (currentElement as? DocumentElement.Paragraph)?.spans?.sumOf { it.text.length } ?: 0
                 addElementToPage(
-                    currentElement,
-                    state.currentY,
-                    state.currentPageIndex,
-                    dimensions,
-                    state.currentPageElements,
-                    isDarkMode
+                    element = currentElement,
+                    yPositionPt = state.currentY,
+                    pageIndex = state.currentPageIndex,
+                    dimensions = dimensions,
+                    pageElements = state.currentPageElements,
+                    isDarkMode = isDarkMode,
+                    logicalElementId = originalLogicalId,
+                    fragmentIndex = fragmentIndex,
+                    isFragment = isSplitFragment,
+                    charStart = accumulatedCharOffset,
+                    charEnd = accumulatedCharOffset + elementCharCount
                 )
                 state.currentY += elementHeight
                 pending = null
@@ -244,13 +254,19 @@ class PrintPaginator(
                 if (state.currentPageElements.isNotEmpty()) {
                     advanceToNextPage(state)
                 }
+                val elementCharCount = (currentElement as? DocumentElement.Paragraph)?.spans?.sumOf { it.text.length } ?: 0
                 addElementToPage(
-                    currentElement,
-                    state.currentY,
-                    state.currentPageIndex,
-                    dimensions,
-                    state.currentPageElements,
-                    isDarkMode
+                    element = currentElement,
+                    yPositionPt = state.currentY,
+                    pageIndex = state.currentPageIndex,
+                    dimensions = dimensions,
+                    pageElements = state.currentPageElements,
+                    isDarkMode = isDarkMode,
+                    logicalElementId = originalLogicalId,
+                    fragmentIndex = fragmentIndex,
+                    isFragment = isSplitFragment,
+                    charStart = accumulatedCharOffset,
+                    charEnd = accumulatedCharOffset + elementCharCount
                 )
                 state.currentY += elementHeight
                 pending = null
@@ -265,15 +281,23 @@ class PrintPaginator(
                 val madeProgress = fragment1 != null && firstHeight > 0f
 
                 if (fragment1 != null) {
+                    val f1CharCount = (fragment1 as? DocumentElement.Paragraph)?.spans?.sumOf { it.text.length } ?: 0
                     addElementToPage(
-                        fragment1,
-                        state.currentY,
-                        state.currentPageIndex,
-                        dimensions,
-                        state.currentPageElements,
-                        isDarkMode
+                        element = fragment1,
+                        yPositionPt = state.currentY,
+                        pageIndex = state.currentPageIndex,
+                        dimensions = dimensions,
+                        pageElements = state.currentPageElements,
+                        isDarkMode = isDarkMode,
+                        logicalElementId = originalLogicalId,
+                        fragmentIndex = fragmentIndex,
+                        isFragment = true,
+                        charStart = accumulatedCharOffset,
+                        charEnd = accumulatedCharOffset + f1CharCount
                     )
                     state.currentY += firstHeight
+                    fragmentIndex++
+                    accumulatedCharOffset += f1CharCount
                 }
 
                 pending = fragment2
@@ -282,13 +306,19 @@ class PrintPaginator(
                     if (state.currentPageElements.isNotEmpty()) {
                         advanceToNextPage(state)
                     } else if (!madeProgress) {
+                        val pendingCharCount = (pending as? DocumentElement.Paragraph)?.spans?.sumOf { it.text.length } ?: 0
                         addElementToPage(
-                            pending,
-                            state.currentY,
-                            state.currentPageIndex,
-                            dimensions,
-                            state.currentPageElements,
-                            isDarkMode
+                            element = pending,
+                            yPositionPt = state.currentY,
+                            pageIndex = state.currentPageIndex,
+                            dimensions = dimensions,
+                            pageElements = state.currentPageElements,
+                            isDarkMode = isDarkMode,
+                            logicalElementId = originalLogicalId,
+                            fragmentIndex = fragmentIndex,
+                            isFragment = true,
+                            charStart = accumulatedCharOffset,
+                            charEnd = accumulatedCharOffset + pendingCharCount
                         )
                         state.currentY += measureElement(pending, dimensions)
                         pending = null
@@ -530,7 +560,12 @@ class PrintPaginator(
         pageIndex: Int,
         dimensions: PageDimensions,
         pageElements: MutableList<PositionedElement>,
-        isDarkMode: Boolean = false
+        isDarkMode: Boolean = false,
+        logicalElementId: String = element.id,
+        fragmentIndex: Int = 0,
+        isFragment: Boolean = false,
+        charStart: Int = 0,
+        charEnd: Int = 0
     ) {
         val elementHeight = measureElement(element, dimensions)
         val indent = when (element) {
@@ -557,7 +592,12 @@ class PrintPaginator(
                 bounds = bounds,
                 indentation = indent,
                 metadata = mapOf("originalHeight" to elementHeight),
-                layoutResult = createLayoutResult(element, dimensions, indent, isDarkMode)
+                layoutResult = createLayoutResult(element, dimensions, indent, isDarkMode),
+                logicalElementId = logicalElementId,
+                fragmentIndex = fragmentIndex,
+                isFragment = isFragment,
+                charStart = charStart,
+                charEnd = charEnd
             )
         )
     }

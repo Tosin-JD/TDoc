@@ -21,5 +21,7 @@ data class EditorUiState(
     val diagnostics: DiagnosticsSummary = DiagnosticsSummary(),
     val outline: List<OutlineEntry> = emptyList(),
     val protected: Boolean = false,
-    val pageLayout: PageLayoutState = PageLayoutState()
+    val pageLayout: PageLayoutState = PageLayoutState(),
+    val activeEditingElementId: String? = null,
+    val zoomScale: Float = 1.0f
 )

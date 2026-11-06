@@ -2,46 +2,38 @@ package com.tosin.docprocessor.ui.editor.layouts.print
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.core.color.DocumentColorTokens
 import com.tosin.docprocessor.core.rendering.PrintElementRenderer
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.layout.PageModel
-import com.tosin.docprocessor.domain.model.layout.PositionedElement
 import com.tosin.docprocessor.domain.pagination.UnitConverter
 import com.tosin.docprocessor.ui.editor.EditorViewModel
-import com.tosin.docprocessor.ui.editor.renderer.AnnotatedStringMappers.toAnnotatedString
 import kotlin.math.min
 
 @Composable
@@ -62,9 +54,11 @@ fun PageView(
     val basePageWidthPx = remember(pageModel.dimensions.width, unitConverter) {
         unitConverter.ptToPx(pageModel.dimensions.width)
     }
-    val basePageHeightPx = remember(pageModel.dimensions.height, unitConverter) {
-        unitConverter.ptToPx(pageModel.dimensions.height)
-    }
+    val pxPerPt = remember(unitConverter) { unitConverter.ptToPx(1f) }
+
+    val uiState by viewModel.uiState.collectAsState()
+    val activeEditingElementId = uiState.activeEditingElementId
+
     // Page, label and edit-field colours come from the same resolved theme as
     // the chrome; no hardcoded black/white in the page surface.
     val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
@@ -72,52 +66,6 @@ fun PageView(
         targetValue = Color(tokens.pageBackground),
         label = "print-page"
     )
-    val renderBlock = remember(pageModel, renderer, isEditable, isDarkMode, unitConverter) {
-        { drawScope: androidx.compose.ui.graphics.drawscope.DrawScope ->
-            with(renderer) {
-                with(drawScope) {
-                    val pageScale = min(
-                        size.width / basePageWidthPx,
-                        size.height / basePageHeightPx
-                    )
-
-                    withTransform({
-                        scale(scaleX = pageScale, scaleY = pageScale, pivot = Offset.Zero)
-                    }) {
-                        pageModel.headerElements.forEach {
-                            try {
-                                render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
-                            } catch (e: Exception) {
-                            }
-                        }
-
-                        val bodyRect = pageModel.dimensions.bodyRect
-                        val left = unitConverter.ptToPx(bodyRect.left)
-                        val top = unitConverter.ptToPx(bodyRect.top)
-                        val right = unitConverter.ptToPx(bodyRect.right)
-                        val bottom = unitConverter.ptToPx(bodyRect.bottom)
-                        clipRect(left, top, right, bottom) {
-                            pageModel.elements.forEach {
-                                try {
-                                    render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
-                                } catch (e: Exception) {
-                                    // Skip bad elements to prevent page crash
-                                }
-                            }
-                        }
-
-                        pageModel.footerElements.forEach {
-                            try {
-                                render(it, renderTextContent = !isEditable, isDarkMode = isDarkMode)
-                            } catch (e: Exception) {
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
@@ -127,6 +75,7 @@ fun PageView(
         val pageHeight = pageWidth / pageAspectRatio
         val pageWidthPx = with(density) { pageWidth.toPx() }
         val pageHeightPx = with(density) { pageHeight.toPx() }
+        val basePageHeightPx = unitConverter.ptToPx(pageModel.dimensions.height)
         val displayScale = remember(pageWidthPx, pageHeightPx, basePageWidthPx, basePageHeightPx) {
             min(pageWidthPx / basePageWidthPx, pageHeightPx / basePageHeightPx)
         }
@@ -143,19 +92,96 @@ fun PageView(
                 shape = RectangleShape,
                 shadowElevation = 6.dp
             ) {
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(isEditable, pageModel, displayScale) {
+                            if (!isEditable) return@pointerInput
+                            detectTapGestures(
+                                onTap = { tapOffset ->
+                                    val tapPtX = (tapOffset.x / displayScale) / pxPerPt
+                                    val tapPtY = (tapOffset.y / displayScale) / pxPerPt
+                                    val hit = pageModel.elements.find { elem ->
+                                        (elem.element is DocumentElement.Paragraph || elem.element is DocumentElement.SectionHeader) &&
+                                            elem.bounds.contains(tapPtX, tapPtY)
+                                    }
+                                    if (hit != null) {
+                                        viewModel.setActiveEditingElement(hit.elementId)
+                                    } else {
+                                        viewModel.setActiveEditingElement(null)
+                                    }
+                                }
+                            )
+                        }
+                ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        renderBlock(this)
+                        withTransform({
+                            scale(scaleX = displayScale, scaleY = displayScale, pivot = Offset.Zero)
+                        }) {
+                            with(renderer) {
+                                pageModel.headerElements.forEach { positionedElement ->
+                                    render(
+                                        positionedElement = positionedElement,
+                                        activeEditingElementId = activeEditingElementId,
+                                        isDarkMode = isDarkMode
+                                    )
+                                }
+
+                                val bodyRect = pageModel.dimensions.bodyRect
+                                clipRect(
+                                    unitConverter.ptToPx(bodyRect.left),
+                                    unitConverter.ptToPx(bodyRect.top),
+                                    unitConverter.ptToPx(bodyRect.right),
+                                    unitConverter.ptToPx(bodyRect.bottom)
+                                ) {
+                                    pageModel.elements.forEach { positionedElement ->
+                                        render(
+                                            positionedElement = positionedElement,
+                                            activeEditingElementId = activeEditingElementId,
+                                            isDarkMode = isDarkMode
+                                        )
+                                    }
+                                }
+
+                                pageModel.footerElements.forEach { positionedElement ->
+                                    render(
+                                        positionedElement = positionedElement,
+                                        activeEditingElementId = activeEditingElementId,
+                                        isDarkMode = isDarkMode
+                                    )
+                                }
+                            }
+                        }
                     }
-                    if (isEditable) {
-                        EditablePrintOverlay(
-                            pageElements = pageModel.elements,
-                            pageScale = displayScale,
-                            unitConverter = unitConverter,
-                            viewModel = viewModel,
-                            tokens = tokens
-                        )
+
+                    if (isEditable && activeEditingElementId != null) {
+                        val activeElement = pageModel.elements.find {
+                            it.elementId == activeEditingElementId || it.logicalElementId == activeEditingElementId
+                        }
+                        if (activeElement != null) {
+                            ActivePrintElementEditor(
+                                positionedElement = activeElement,
+                                pageScale = displayScale,
+                                unitConverter = unitConverter,
+                                tokens = tokens,
+                                isDarkMode = isDarkMode,
+                                onCommitParagraph = { newContent ->
+                                    viewModel.updateParagraphFragment(
+                                        logicalId = activeElement.logicalElementId,
+                                        fragmentIndex = activeElement.fragmentIndex,
+                                        isFragment = activeElement.isFragment,
+                                        charStart = activeElement.charStart,
+                                        charEnd = activeElement.charEnd,
+                                        updatedFragmentContent = newContent
+                                    )
+                                },
+                                onCommitHeader = { newText ->
+                                    viewModel.updateSectionHeaderById(activeElement.elementId, newText)
+                                }
+                            )
+                        }
                     }
+
                     Text(
                         text = "Page ${pageModel.index + 1} of $pageCount",
                         modifier = Modifier
@@ -168,117 +194,4 @@ fun PageView(
             }
         }
     }
-}
-
-@Composable
-private fun EditablePrintOverlay(
-    pageElements: List<PositionedElement>,
-    pageScale: Float,
-    unitConverter: UnitConverter,
-    viewModel: EditorViewModel,
-    tokens: DocumentColorTokens
-) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        pageElements.forEach { positionedElement ->
-            when (val element = positionedElement.element) {
-                is DocumentElement.Paragraph -> EditableParagraphBlock(
-                    positionedElement = positionedElement,
-                    pageScale = pageScale,
-                    unitConverter = unitConverter,
-                    tokens = tokens,
-                    onValueChange = { viewModel.updateParagraphById(positionedElement.elementId, it) }
-                )
-                is DocumentElement.SectionHeader -> EditableHeaderBlock(
-                    element = element,
-                    positionedElement = positionedElement,
-                    pageScale = pageScale,
-                    unitConverter = unitConverter,
-                    tokens = tokens,
-                    onValueChange = { viewModel.updateSectionHeaderById(positionedElement.elementId, it) }
-                )
-                else -> Unit
-            }
-        }
-    }
-}
-
-@Composable
-private fun EditableParagraphBlock(
-    positionedElement: PositionedElement,
-    pageScale: Float,
-    unitConverter: UnitConverter,
-    tokens: DocumentColorTokens,
-    onValueChange: (androidx.compose.ui.text.AnnotatedString) -> Unit
-) {
-    val paragraph = positionedElement.element as? DocumentElement.Paragraph ?: return
-    val currentAnnotatedString = paragraph.toAnnotatedString()
-    var fieldValue by remember(paragraph.id) { mutableStateOf(TextFieldValue(currentAnnotatedString)) }
-    androidx.compose.runtime.LaunchedEffect(currentAnnotatedString) {
-        if (fieldValue.annotatedString != currentAnnotatedString) {
-            val oldText = fieldValue.text
-            val selection = fieldValue.selection
-            val sameEdit = oldText == currentAnnotatedString.text
-            fieldValue = TextFieldValue(
-                annotatedString = currentAnnotatedString,
-                selection = if (sameEdit) selection else androidx.compose.ui.text.TextRange(currentAnnotatedString.length)
-            )
-        }
-    }
-    val density = LocalDensity.current
-    val xDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.left) * pageScale).toDp() }
-    val yDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.top) * pageScale).toDp() }
-    val widthDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.width()) * pageScale).toDp() }
-    val heightDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.height()) * pageScale).toDp() }
-
-    BasicTextField(
-        value = fieldValue,
-        onValueChange = {
-            fieldValue = it
-            onValueChange(it.annotatedString)
-        },
-        modifier = Modifier
-            .offset { IntOffset(xDp.roundToPx(), yDp.roundToPx()) }
-            .width(widthDp)
-            .height(heightDp),
-        textStyle = TextStyle(color = Color(tokens.contentText)),
-        singleLine = false,
-        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
-    )
-}
-
-@Composable
-private fun EditableHeaderBlock(
-    element: DocumentElement.SectionHeader,
-    positionedElement: PositionedElement,
-    pageScale: Float,
-    unitConverter: UnitConverter,
-    tokens: DocumentColorTokens,
-    onValueChange: (String) -> Unit
-) {
-    var fieldValue by remember(element.id) { mutableStateOf(element.text) }
-    if (fieldValue != element.text && fieldValue.length != element.text.length) {
-        fieldValue = element.text
-    }
-    val density = LocalDensity.current
-    val xDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.left) * pageScale).toDp() }
-    val yDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.top) * pageScale).toDp() }
-    val widthDp = with(density) { (unitConverter.ptToPx(positionedElement.bounds.width()) * pageScale).toDp() }
-    val textStyle = when (element.level) {
-        1 -> MaterialTheme.typography.headlineSmall
-        2 -> MaterialTheme.typography.titleLarge
-        else -> MaterialTheme.typography.titleMedium
-    }
-
-    BasicTextField(
-        value = fieldValue,
-        onValueChange = {
-            fieldValue = it
-            onValueChange(it)
-        },
-        modifier = Modifier
-            .offset { IntOffset(xDp.roundToPx(), yDp.roundToPx()) }
-            .width(widthDp),
-        textStyle = textStyle.copy(color = Color(tokens.contentText)),
-        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
-    )
 }
