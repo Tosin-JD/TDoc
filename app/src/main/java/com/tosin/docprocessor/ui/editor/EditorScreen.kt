@@ -7,14 +7,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -35,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -131,6 +135,17 @@ fun EditorScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        // In edit mode the formatting toolbar owns the bottom edge and applies
+        // max(navigation bar, ime) itself. Keeping the Scaffold's bottom inset here
+        // would stack navigation-bar padding under the toolbar while the keyboard is
+        // open. Preview mode keeps the default insets (FAB and content safe area).
+        contentWindowInsets = if (uiState.editorMode == EditorMode.EDIT) {
+            WindowInsets.safeDrawing.only(
+                WindowInsetsSides.Horizontal + WindowInsetsSides.Top
+            )
+        } else {
+            ScaffoldDefaults.contentWindowInsets
+        },
         topBar = {
             if (uiState.editorMode == EditorMode.PREVIEW) {
                 TopAppBar(
@@ -307,7 +322,12 @@ fun EditorScreen(
                     onUnderlineClick = { /* TODO */ },
                     onAlignmentClick = { /* TODO */ },
                     onFontFeaturesClick = { showFontSheet = true },
-                    modifier = Modifier.imePadding()
+                    // Single bottom inset: the keyboard when it is visible, the
+                    // navigation bar / cutout when it is not. Never both, so the
+                    // toolbar sits flush on the keyboard with no gap beneath it.
+                    modifier = Modifier.windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)
+                    )
                 )
             }
         }
