@@ -48,11 +48,12 @@ class IncrementalPaginator(
         previousData: DocumentData,
         newData: DocumentData,
         dimensions: PageDimensions,
-        changedElementIndex: Int
+        changedElementIndex: Int,
+        isDarkMode: Boolean = false
     ): List<PageModel> {
         if (changedElementIndex < 0 || changedElementIndex >= newData.content.size) {
             // Index out of range; do a full re-pagination
-            return printPaginator.paginate(newData, dimensions)
+            return printPaginator.paginate(newData, dimensions, isDarkMode = isDarkMode)
         }
 
         val changedElement = newData.content[changedElementIndex]
@@ -73,14 +74,16 @@ class IncrementalPaginator(
 
         // Step 2: Find the page where the changed element is located
         val affectedPageIndex = findPageContainingElement(previousPages, changedElement.id)
-            ?: return printPaginator.paginate(newData, dimensions)
+            ?: return printPaginator.paginate(newData, dimensions, isDarkMode = isDarkMode)
 
         // Step 3: Re-paginate from affected page onwards
         // But first, gather pages before the affected page (they're unchanged)
         val unchangedPages = previousPages.take(affectedPageIndex)
 
         // Re-paginate from the changed element onwards
-        val repaginatedPages = printPaginator.paginate(newData, dimensions, changedElementIndex)
+        val repaginatedPages = printPaginator.paginate(
+            newData, dimensions, changedElementIndex, isDarkMode = isDarkMode
+        )
 
         // Step 4: Find the settlement point (where the ripple ends)
         val settledPageIndex = findSettlementPoint(
@@ -230,10 +233,11 @@ class IncrementalPaginator(
     override fun paginate(
         data: DocumentData,
         dimensions: PageDimensions,
-        startIndex: Int
+        startIndex: Int,
+        isDarkMode: Boolean
     ): List<PageModel> {
         // For full pagination, delegate to PrintPaginator
-        return printPaginator.paginate(data, dimensions, startIndex)
+        return printPaginator.paginate(data, dimensions, startIndex, isDarkMode = isDarkMode)
     }
 
     override fun estimatePageCount(

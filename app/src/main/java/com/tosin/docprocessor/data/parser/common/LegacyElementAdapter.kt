@@ -33,6 +33,7 @@ import com.tosin.docprocessor.domain.document.model.style.VerticalAlign
 import com.tosin.docprocessor.domain.document.model.style.VerticalCellAlign
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.pagination.table.TableMergeResolver
+import com.tosin.docprocessor.domain.rendering.table.TablePresentationResolver
 import java.util.UUID
 
 /**
@@ -54,6 +55,7 @@ class LegacyElementAdapter {
                     } else HeaderFooterKind.FOOTER,
                     variant = story.variant.name.lowercase(),
                     text = plainText(story.blocks),
+                    spans = cellSpans(story.blocks),
                     paragraphCount = story.blocks.size,
                     tableCount = story.blocks.count { it is BlockNode.Table }
                 )
@@ -165,7 +167,8 @@ class LegacyElementAdapter {
             left = node.style.page.margins.leftPoints?.times(20)?.toInt()
         ),
         columnCount = node.style.page.columns,
-        pageNumberStart = node.style.pageNumberStart
+        pageNumberStart = node.style.pageNumberStart,
+        pageBackground = node.style.page.background
     )
 
     private fun paragraphElements(node: BlockNode.Paragraph): List<DocumentElement> {
@@ -305,7 +308,7 @@ class LegacyElementAdapter {
                     is InlineNode.Break -> when (inline.kind) {
                         com.tosin.docprocessor.domain.document.model.BreakKind.LINE -> spans += TextSpan(
                             text = "\n",
-                            color = textStyle.color ?: "000000"
+                            color = textStyle.color?.removePrefix("#")
                         )
                         com.tosin.docprocessor.domain.document.model.BreakKind.PAGE,
                         com.tosin.docprocessor.domain.document.model.BreakKind.COLUMN,
@@ -346,7 +349,7 @@ class LegacyElementAdapter {
                     is InlineNode.CommentBoundary, is InlineNode.CommentReference -> Unit
                     is InlineNode.Drawing -> drawings += drawingElement(inline)
                     is InlineNode.TextBox -> plainText(inline.blocks).takeIf { it.isNotEmpty() }?.let { boxText ->
-                        spans += TextSpan(text = boxText, color = textStyle.color ?: "000000")
+                        spans += TextSpan(text = boxText, color = textStyle.color?.removePrefix("#"))
                     }
                     is InlineNode.Opaque -> drawings += unsupported(inline.node)
                 }
@@ -385,7 +388,9 @@ class LegacyElementAdapter {
                     altText = drawing.altText,
                     title = drawing.title,
                     wrapStyle = drawing.frameStyle.wrapStyle,
-                    rotation = drawing.frameStyle.rotationDegrees?.toInt()
+                    rotation = drawing.frameStyle.rotationDegrees?.toInt(),
+                    fillColor = drawing.frameStyle.fillColor,
+                    strokeColor = drawing.frameStyle.strokeColor
                 )
             )
         }
@@ -404,7 +409,7 @@ class LegacyElementAdapter {
         isHidden = style.hidden == true,
         fontFamily = style.fontAscii ?: style.fontHAnsi,
         fontSize = style.fontSizePoints?.toFloat(),
-        color = style.color?.removePrefix("#") ?: "000000",
+        color = style.color?.removePrefix("#"),
         highlightColor = style.highlight,
         characterSpacing = style.letterSpacingPoints?.times(20)?.toInt(),
         language = style.language,
@@ -465,7 +470,8 @@ class LegacyElementAdapter {
             metadata = metadata,
             richRows = richRows,
             gridColumnWidthsPt = gridColumnWidthsPt,
-            rowHeightsPt = node.rows.map { it.heightPoints?.toFloat() ?: 0f }
+            rowHeightsPt = node.rows.map { it.heightPoints?.toFloat() ?: 0f },
+            presentation = TablePresentationResolver.resolve(node) { cell -> cellSpans(cell.blocks) }
         )
     }
 
@@ -547,7 +553,9 @@ class LegacyElementAdapter {
                         isInline = node.frameStyle.anchor ==
                             com.tosin.docprocessor.domain.document.model.style.FrameAnchor.INLINE,
                         altText = node.altText,
-                        title = node.title
+                        title = node.title,
+                        fillColor = node.frameStyle.fillColor,
+                        strokeColor = node.frameStyle.strokeColor
                     )
                 )
             )

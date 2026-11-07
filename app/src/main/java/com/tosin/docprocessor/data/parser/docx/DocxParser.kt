@@ -20,6 +20,9 @@ import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import com.tosin.docprocessor.data.parser.internal.models.SectionProperties
 import com.tosin.docprocessor.data.parser.internal.models.EdgeInsets
 import com.tosin.docprocessor.data.parser.internal.models.MetadataInfo
+import com.tosin.docprocessor.data.parser.internal.models.RichTableCell
+import com.tosin.docprocessor.domain.document.model.style.Border
+import com.tosin.docprocessor.domain.document.model.style.CellBorders
 import com.tosin.docprocessor.data.parser.internal.models.TableMetadata
 import com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
@@ -61,11 +64,11 @@ class DocxParser(
 
                 val elements = mutableListOf<DocumentElement>()
                 parseMetadata(docxPackage)?.let(elements::add)
-                
+
                 // Parse footnotes and endnotes
                 elements += parseNotes(docxPackage.xml("word/footnotes.xml"), com.tosin.docprocessor.data.parser.internal.models.NoteKind.FOOTNOTE)
                 elements += parseNotes(docxPackage.xml("word/endnotes.xml"), com.tosin.docprocessor.data.parser.internal.models.NoteKind.ENDNOTE)
-                
+
                 // Parse comments
                 elements += parseComments(docxPackage.xml("word/comments.xml"))
 
@@ -124,7 +127,7 @@ class DocxParser(
             val paragraphText = spans.joinToString("") { it.text }
             val snapshot = spans.toList()
             spans.clear()
-            
+
             val numPr = paragraph.firstChild("pPr")?.firstChild("numPr")
             val listInfo = numberingParser.getListInfo(
                 numPr?.firstChild("numId")?.attribute("val"),
@@ -274,32 +277,99 @@ class DocxParser(
     private fun parseTable(table: Element): DocumentElement.Table? {
         val tblPr = table.firstChild("tblPr")
         val tableStyleId = tblPr?.firstChild("tblStyle")?.attribute("val")
-        val shadingColor = tblPr?.firstChild("shading")?.attribute("fill")
-        
+        val shadingColor = tblPr?.firstChild("shd")?.attribute("fill")
+            ?: tblPr?.firstChild("shading")?.attribute("fill")
+
+        val tblBorders = tblPr?.firstChild("tblBorders")
+        fun parseBorderSide(side: String): Border? {
+            val b = tblBorders?.firstChild(side) ?: return null
+            val style = b.attribute("val")
+            if (style == "nil" || style == "none" || style == "zero") return null
+            val sz = b.attribute("sz")?.toIntOrNull() ?: 4
+            val color = b.attribute("color")?.takeUnless { it.equals("auto", true) }
+            return Border(style = style ?: "single", widthPoints = sz / 8.0, color = color)
+        }
+        val directTableBorders = CellBorders(
+            top = parseBorderSide("top"),
+            left = parseBorderSide("left"),
+            bottom = parseBorderSide("bottom"),
+            right = parseBorderSide("right")
+        )
+        val isTableGrid = tableStyleId == null || tableStyleId.contains("TableGrid", ignoreCase = true)
+        val tableBorders = if (!directTableBorders.hasAny() && isTableGrid) {
+            val def = Border(style = "single", widthPoints = 0.5, color = null)
+            CellBorders(top = def, left = def, bottom = def, right = def)
+        } else {
+            directTableBorders
+        }
+
+        val gridColumnWidthsPt = table.firstChild("tblGrid")
+            ?.children("gridCol")
+            ?.mapNotNull { col ->
+                col.attribute("w")?.toIntOrNull()?.let { it / 20f }
+            }
+            .orEmpty()
+
         val rowMetadata = mutableListOf<List<TableCellMetadata>>()
+        val richRows = mutableListOf<List<RichTableCell>>()
         val rows = table.children("tr").map { row ->
             val cellsMetadata = mutableListOf<TableCellMetadata>()
+            val richCells = mutableListOf<RichTableCell>()
             val cells = row.children("tc").map { cell ->
                 val cellProperties = cell.firstChild("tcPr")
+                val gridSpan = cellProperties?.firstChild("gridSpan")?.attribute("val")?.toIntOrNull() ?: 1
+                val hMerge = cellProperties?.firstChild("hMerge")?.attribute("val")
+                val vMerge = cellProperties?.firstChild("vMerge")?.attribute("val")
+                val cellShd = cellProperties?.firstChild("shd")?.attribute("fill")
                 cellsMetadata += TableCellMetadata(
-                    gridSpan = cellProperties?.firstChild("gridSpan")?.attribute("val")?.toIntOrNull(),
-                    horizontalMerge = cellProperties?.firstChild("hMerge")?.attribute("val"),
-                    verticalMerge = cellProperties?.firstChild("vMerge")?.attribute("val"),
-                    shadingColor = cellProperties?.firstChild("shd")?.attribute("fill"),
+                    gridSpan = gridSpan.takeIf { it > 1 },
+                    horizontalMerge = hMerge,
+                    verticalMerge = vMerge,
+                    shadingColor = cellShd,
                     nestedTableCount = cell.children("tbl").size
                 )
-                cell.descendants("p")
+                val text = cell.descendants("p")
                     .mapNotNull { paragraph ->
-                        val text = paragraph.descendants("t").joinToString("") { it.textContent.orEmpty() }
+                        val t = paragraph.descendants("t").joinToString("") { it.textContent.orEmpty() }
                             .ifBlank {
                                 paragraph.descendants("tab").joinToString("") { "\t" } +
                                     paragraph.descendants("br").joinToString("") { "\n" }
                             }
-                        text.takeIf { it.isNotBlank() }
+                        t.takeIf { it.isNotBlank() }
                     }
                     .joinToString("\n")
+
+                val tcBorders = cellProperties?.firstChild("tcBorders")
+                fun parseTcBorder(side: String): Border? {
+                    val b = tcBorders?.firstChild(side) ?: return null
+                    val style = b.attribute("val")
+                    if (style == "nil" || style == "none" || style == "zero") return null
+                    val sz = b.attribute("sz")?.toIntOrNull() ?: 4
+                    val color = b.attribute("color")?.takeUnless { it.equals("auto", true) }
+                    return Border(style = style ?: "single", widthPoints = sz / 8.0, color = color)
+                }
+                val cellBorderOverrides = if (tcBorders != null) {
+                    CellBorders(
+                        top = parseTcBorder("top"),
+                        left = parseTcBorder("left"),
+                        bottom = parseTcBorder("bottom"),
+                        right = parseTcBorder("right")
+                    )
+                } else null
+
+                val isCovered = hMerge == "continue" || vMerge == "continue"
+                richCells += RichTableCell(
+                    spans = listOf(TextSpan(text = text)),
+                    colSpan = gridSpan,
+                    rowSpan = 1,
+                    isCovered = isCovered,
+                    backgroundColor = cellShd,
+                    borders = cellBorderOverrides ?: tableBorders
+                )
+                text
             }
             rowMetadata += cellsMetadata
+            richRows += richCells
             cells
         }.filter { row -> row.isNotEmpty() }
 
@@ -310,8 +380,11 @@ class DocxParser(
             metadata = TableMetadata(
                 styleId = tableStyleId,
                 shadingColor = shadingColor,
+                borders = tableBorders,
                 rows = rowMetadata
-            )
+            ),
+            richRows = richRows,
+            gridColumnWidthsPt = gridColumnWidthsPt
         )
     }
 
@@ -354,7 +427,7 @@ class DocxParser(
         docxPackage: DocxPackage
     ): List<DocumentElement> {
         val elements = mutableListOf<DocumentElement>()
-        
+
         fun parseRef(type: String, kind: com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind) {
             sectPr.children(type).forEach { ref ->
                 val rId = ref.attribute("id") ?: return@forEach
@@ -375,7 +448,7 @@ class DocxParser(
 
         parseRef("headerReference", com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind.HEADER)
         parseRef("footerReference", com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind.FOOTER)
-        
+
         return elements
     }
 
@@ -386,11 +459,11 @@ class DocxParser(
             com.tosin.docprocessor.data.parser.internal.models.NoteKind.FOOTNOTE -> "footnote"
             com.tosin.docprocessor.data.parser.internal.models.NoteKind.ENDNOTE -> "endnote"
         }
-        
+
         xml.documentElement.children(tagName).forEach { note ->
             val id = note.attribute("id") ?: return@forEach
             if (id.toIntOrNull() ?: 0 <= 0) return@forEach
-            
+
             val text = note.descendants("t").joinToString("") { it.textContent.orEmpty() }
             elements += DocumentElement.Note(
                 info = NoteInfo(
@@ -406,12 +479,12 @@ class DocxParser(
     private fun parseComments(xml: Document?): List<DocumentElement> {
         if (xml == null) return emptyList()
         val elements = mutableListOf<DocumentElement>()
-        
+
         xml.documentElement.children("comment").forEach { comment ->
             val id = comment.attribute("id") ?: return@forEach
             val author = comment.attribute("author")
             val text = comment.descendants("t").joinToString("") { it.textContent.orEmpty() }
-            
+
             elements += DocumentElement.Comment(
                 info = CommentInfo(
                     id = id,
@@ -457,7 +530,8 @@ class DocxParser(
                 isSubscript = runProperties?.descendants("vertAlign")?.firstOrNull()?.attribute("val") == "subscript",
                 fontFamily = runProperties?.descendants("rFonts")?.firstOrNull()?.attribute("ascii"),
                 fontSize = runProperties?.descendants("sz")?.firstOrNull()?.attribute("val")?.toIntOrNull()?.div(2)?.toFloat(),
-                color = runProperties?.descendants("color")?.firstOrNull()?.attribute("val") ?: "000000",
+                color = runProperties?.descendants("color")?.firstOrNull()?.attribute("val")
+                    ?.takeUnless { it.equals("auto", true) },
                 highlightColor = runProperties?.firstChild("highlight")?.attribute("val"),
                 language = runProperties?.firstChild("lang")?.attribute("val"),
                 characterSpacing = runProperties?.firstChild("spacing")?.attribute("val")?.toIntOrNull(),

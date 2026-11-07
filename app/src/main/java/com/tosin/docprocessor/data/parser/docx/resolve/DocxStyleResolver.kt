@@ -4,8 +4,12 @@ import com.tosin.docprocessor.data.parser.common.w
 import com.tosin.docprocessor.data.parser.common.wAttr
 import com.tosin.docprocessor.data.parser.common.wFirst
 import com.tosin.docprocessor.domain.document.model.StyleCatalogue
+import com.tosin.docprocessor.domain.document.model.style.Border
+import com.tosin.docprocessor.domain.document.model.style.CellBorders
 import com.tosin.docprocessor.domain.document.model.style.ParagraphStyle
 import com.tosin.docprocessor.domain.document.model.style.TableBandFlags
+import com.tosin.docprocessor.domain.document.model.style.TableRegion
+import com.tosin.docprocessor.domain.document.model.style.TableRegionStyle
 import com.tosin.docprocessor.domain.document.model.style.TableStyle
 import com.tosin.docprocessor.domain.document.model.style.TextStyle
 import org.w3c.dom.Document
@@ -58,9 +62,48 @@ class DocxStyleResolver private constructor(
     fun tableStyle(styleId: String?): TableStyle {
         if (styleId == null) return TableStyle()
         return tableCache.getOrPut(styleId) {
-            val raw = tableStyles[styleId] ?: return@getOrPut TableStyle()
-            raw.tableStyle.copy(styleId = raw.id, styleName = raw.name)
+            val raw = tableStyles[styleId]
+            if (raw == null && isBuiltInTableGrid(styleId)) {
+                return@getOrPut defaultTableGridStyle(styleId)
+            }
+            if (raw == null) return@getOrPut TableStyle()
+            val chain = inheritanceChain(raw, tableStyles)
+            val folded = chain.fold(TableStyle()) { acc, style -> acc.mergedWith(style.tableStyle) }
+            val withDefaults = if (isBuiltInTableGrid(raw.id) || isBuiltInTableGrid(raw.name)) {
+                defaultTableGridStyle(raw.id).mergedWith(folded)
+            } else {
+                folded
+            }
+            withDefaults.copy(styleId = raw.id, styleName = raw.name)
         }
+    }
+
+    private fun isBuiltInTableGrid(idOrName: String?): Boolean {
+        if (idOrName == null) return false
+        val clean = idOrName.replace(" ", "").lowercase()
+        return clean == "tablegrid" || clean.startsWith("tablegrid")
+    }
+
+    private fun defaultTableGridStyle(styleId: String): TableStyle {
+        val defaultBorder = Border(style = "single", widthPoints = 0.5, color = null)
+        val outer = CellBorders(
+            top = defaultBorder,
+            right = defaultBorder,
+            bottom = defaultBorder,
+            left = defaultBorder
+        )
+        val inside = CellBorders(
+            top = defaultBorder,
+            right = defaultBorder,
+            bottom = defaultBorder,
+            left = defaultBorder
+        )
+        return TableStyle(
+            styleId = styleId,
+            styleName = "Table Grid",
+            borders = outer,
+            insideBorders = inside
+        )
     }
 
     fun numIdForStyle(styleId: String?): String? =
@@ -153,22 +196,42 @@ class DocxStyleResolver private constructor(
 
         private fun parseTableStyle(style: Element): TableStyle {
             val tblPr = style.wFirst("tblPr")
+            val regions = linkedMapOf<TableRegion, TableRegionStyle>()
+            style.w("tblStylePr").forEach { stylePr ->
+                val region = TableRegion.fromOoxml(stylePr.wAttr("type")) ?: return@forEach
+                val regionTblPr = stylePr.wFirst("tblPr")
+                regions[region] = TableRegionStyle(
+                    shading = regionTblPr?.wFirst("shd")?.let {
+                        com.tosin.docprocessor.domain.document.model.style.Shading(
+                            fill = it.wAttr("fill")?.takeUnless { v -> v.equals("auto", true) },
+                            color = it.wAttr("color")?.takeUnless { v -> v.equals("auto", true) }
+                        )
+                    },
+                    borders = DocxBorderProperties.parseCellBorders(regionTblPr?.wFirst("tblBorders")),
+                    cellMargins = DocxBorderProperties.parseCellMargins(regionTblPr?.wFirst("tblCellMar")),
+                    runStyle = DocxRunProperties.parse(stylePr.wFirst("rPr")).takeIf { it != TextStyle() },
+                    paragraphStyle = DocxParagraphProperties.parse(stylePr.wFirst("pPr"))
+                        .takeIf { it != ParagraphStyle() }
+                )
+            }
             return TableStyle(
                 styleName = style.wFirst("name")?.wAttr("val"),
                 borders = DocxBorderProperties.parseCellBorders(tblPr?.wFirst("tblBorders")),
+                insideBorders = DocxBorderProperties.parseInsideBorders(tblPr?.wFirst("tblBorders")),
                 cellMargins = DocxBorderProperties.parseCellMargins(tblPr?.wFirst("tblCellMar")),
                 banding = TableBandFlags(
                     firstRow = hasStylePr(style, "firstRow"),
                     lastRow = hasStylePr(style, "lastRow"),
-                    firstColumn = hasStylePr(style, "firstColumn"),
-                    lastColumn = hasStylePr(style, "lastColumn"),
+                    firstColumn = hasStylePr(style, "firstCol"),
+                    lastColumn = hasStylePr(style, "lastCol"),
                     band1 = hasStylePr(style, "band1Horz") || hasStylePr(style, "band1Vert"),
                     band2 = hasStylePr(style, "band2Horz") || hasStylePr(style, "band2Vert")
                 ),
+                regions = regions,
                 shading = tblPr?.wFirst("shd")?.let {
                     com.tosin.docprocessor.domain.document.model.style.Shading(
-                        fill = it.wAttr("fill"),
-                        color = it.wAttr("color")
+                        fill = it.wAttr("fill")?.takeUnless { v -> v.equals("auto", true) },
+                        color = it.wAttr("color")?.takeUnless { v -> v.equals("auto", true) }
                     )
                 }
             )

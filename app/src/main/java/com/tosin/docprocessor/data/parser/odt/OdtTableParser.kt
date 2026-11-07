@@ -1,10 +1,14 @@
 package com.tosin.docprocessor.data.parser.odt
 
-import com.tosin.docprocessor.domain.model.DocumentElement
-import com.tosin.docprocessor.data.parser.internal.models.TableMetadata
-import org.w3c.dom.Element
-
 import com.tosin.docprocessor.data.parser.internal.models.EdgeInsets
+import com.tosin.docprocessor.data.parser.internal.models.RichTableCell
+import com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata
+import com.tosin.docprocessor.data.parser.internal.models.TableMetadata
+import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.domain.document.model.style.Border
+import com.tosin.docprocessor.domain.document.model.style.CellBorders
+import com.tosin.docprocessor.domain.model.DocumentElement
+import org.w3c.dom.Element
 
 class OdtTableParser(
     private val styles: Map<String, OdtStyleParser.StyleProperties> = emptyMap()
@@ -13,30 +17,55 @@ class OdtTableParser(
     private val tableNs = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
 
     fun parseTable(element: Element): DocumentElement.Table {
+        val defaultBorder = Border(style = "solid", widthPoints = 0.5, color = null)
+        val tableBorders = CellBorders(
+            top = defaultBorder,
+            right = defaultBorder,
+            bottom = defaultBorder,
+            left = defaultBorder
+        )
+
         val rows = mutableListOf<List<String>>()
-        val metadataRows = mutableListOf<List<com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata>>()
+        val metadataRows = mutableListOf<List<TableCellMetadata>>()
+        val richRows = mutableListOf<List<RichTableCell>>()
 
         // Only direct rows belong to this table. Descendant queries accidentally
         // pull rows from nested tables into their parent.
         directChildren(element, "table-row").forEach { rowElement ->
             val cells = mutableListOf<String>()
-            val cellMetadata = mutableListOf<com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata>()
+            val cellMetadata = mutableListOf<TableCellMetadata>()
+            val richCells = mutableListOf<RichTableCell>()
 
             directChildren(rowElement, null).forEach { cellElement ->
                 if (cellElement.localName == "covered-table-cell") {
                     cells += ""
-                    cellMetadata += com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata(horizontalMerge = "covered")
+                    cellMetadata += TableCellMetadata(horizontalMerge = "covered")
+                    richCells += RichTableCell(
+                        spans = emptyList(),
+                        isCovered = true,
+                        borders = tableBorders
+                    )
                     return@forEach
                 }
                 if (cellElement.localName != "table-cell") return@forEach
                 val cellText = cellElement.textContent.trim()
                 val span = cellElement.getAttributeNS(tableNs, "number-columns-spanned").toIntOrNull() ?: 1
-                repeat(span) {
+                val rowSpan = cellElement.getAttributeNS(tableNs, "number-rows-spanned").toIntOrNull() ?: 1
+                val cellColor = styles[cellElement.getAttributeNS(tableNs, "style-name")]?.color
+                repeat(span) { index ->
                     cells.add(cellText)
-                    cellMetadata += com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata(
+                    cellMetadata += TableCellMetadata(
                         gridSpan = span.takeIf { it > 1 },
                         verticalMerge = cellElement.getAttributeNS(tableNs, "number-rows-spanned").takeIf { it.isNotBlank() },
-                        shadingColor = styles[cellElement.getAttributeNS(tableNs, "style-name")]?.color
+                        shadingColor = cellColor
+                    )
+                    richCells += RichTableCell(
+                        spans = if (index == 0) listOf(TextSpan(text = cellText)) else emptyList(),
+                        colSpan = if (index == 0) span else 1,
+                        rowSpan = if (index == 0) rowSpan else 1,
+                        isCovered = index > 0,
+                        backgroundColor = cellColor,
+                        borders = tableBorders
                     )
                 }
             }
@@ -44,6 +73,7 @@ class OdtTableParser(
             repeat(repeat) {
                 rows += cells.toList()
                 metadataRows += cellMetadata.toList()
+                richRows += richCells.toList()
             }
         }
 
@@ -59,9 +89,11 @@ class OdtTableParser(
                 caption = null,
                 description = null,
                 borderSummary = null,
+                borders = tableBorders,
                 cellMargins = EdgeInsets(),
                 rows = metadataRows
-            )
+            ),
+            richRows = richRows
         )
     }
 

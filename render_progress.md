@@ -143,17 +143,17 @@ blockers are cross-referenced to **F1–F28** in `parser_progress.md`.
 
 | Element / feature | Status | Notes |
 |---|---|---|
-| Grid lines, outer border, header background, zebra striping | ✅ | `PrintElementRenderer.renderTable`; fallback grid if no layout |
+| Grid lines, outer border | 🟡 | Only document-authored borders paint now (`insideH`/`insideV`, `tblBorders`, cell borders); no theme grid fallback |
 | Table split across pages with header repeat | ✅ | See B |
-| Header-row bold | ✅ | `isBold` on first row when `hasHeader` |
-| Column widths from document grid (`w:tblGrid`) | ❌ | Estimated from longest-cell text heuristic; parsed grid never reaches the legacy model |
-| Cell merge rendering (`gridSpan`, `vMerge`, `hMerge`) | ❌ | Captured in `TableMetadata` but the renderer iterates cells positionally — merged cells render as separate cells |
-| Document border styles/colors/shading | ❌ | Renderer uses app design tokens (`DocumentColorTokens`), not the document's `tblBorders`/`shd` |
-| Row heights from document (`w:trHeight`) | ❌ | Computed from content, min 24pt |
-| Cell margins/padding from document | ❌ | Hardcoded 4pt |
-| Per-cell run formatting (fonts, sizes, colors in cells) | ❌ | `LegacyElementAdapter.table()` flattens cells to plain text; fixed 9pt |
-| Cell horizontal/vertical alignment from document | ❌ | Plain layout `ALIGN_NORMAL`, drawn at cell top |
-| Table width/alignment from document (`tblW`, `jc`) | 🟡 | Always fills printable width, always starts at left margin |
+| Header-row bold | ❌ | Removed: header rows no longer receive synthetic bold/type styling |
+| Column widths from document grid (`w:tblGrid`) | ✅ | `gridColumnWidthsPt` feeds both mobile `TableColumnSizer` preferred widths and print layout |
+| Cell merge rendering (`gridSpan`, `vMerge`, `hMerge`) | ✅ | `TablePresentationResolver` normalizes the dense grid; mobile `DocumentTable` and print both honour spans/covered cells |
+| Document border styles/colors/shading | ✅ | `TablePresentationResolver` resolves cell > `tblStylePr` region > table precedence incl. explicit `nil`; shared by mobile and print |
+| Row heights from document (`w:trHeight`) | 🟡 | Honoured as minimums in print layout; mobile sizes rows to content |
+| Cell margins/padding from document | ✅ | Resolved per-side (`tcMar`/`tblCellMar`/ODF `fo:padding*`) and applied on mobile and print |
+| Per-cell run formatting (fonts, sizes, colors in cells) | ✅ | Rich `TextSpan`s render via `AnnotatedStringMappers` on mobile and `StaticLayout` on print |
+| Cell horizontal/vertical alignment from document | ✅ | `w:vAlign`/paragraph alignment resolved into the presentation model |
+| Table width/alignment from document (`tblW`, `jc`) | 🟡 | Width captured in the presentation; both renderers still fill the available area |
 | Nested tables | ❌ | Flattened to text by `plainText()` |
 | Table caption/description rendering | ❌ | Stored in metadata only |
 

@@ -25,8 +25,16 @@ class DocxTableMapper(
     fun parseTable(table: Element): BlockNode.Table {
         val tblPr = table.wFirst("tblPr")
         val styleId = tblPr?.wFirst("tblStyle")?.wAttr("val")
-        val resolved = context.styles.tableStyle(styleId)
-        val localBorders = DocxBorderProperties.parseCellBorders(tblPr?.wFirst("tblBorders"))
+        val tblBorders = tblPr?.wFirst("tblBorders")
+        val localBorders = DocxBorderProperties.parseCellBorders(tblBorders)
+        val localInsideBorders = DocxBorderProperties.parseInsideBorders(tblBorders)
+        val resolved = if (styleId != null) {
+            context.styles.tableStyle(styleId)
+        } else if (!localBorders.hasAny() && localInsideBorders == null) {
+            context.styles.tableStyle("TableGrid")
+        } else {
+            context.styles.tableStyle(null)
+        }
         val localMargins = DocxBorderProperties.parseCellMargins(tblPr?.wFirst("tblCellMar"))
         val style = resolved.copy(
             styleId = styleId ?: resolved.styleId,
@@ -34,12 +42,16 @@ class DocxTableMapper(
                 ?: resolved.alignment,
             widthPoints = Units.twipsToPoints(tblPr?.wFirst("tblW")?.wAttr("w")?.toIntOrNull())
                 ?: resolved.widthPoints,
-            borders = localBorders.takeIf {
-                it.top != null || it.right != null || it.bottom != null || it.left != null
-            } ?: resolved.borders,
-            cellMargins = localMargins ?: resolved.cellMargins,
+            // Direct formatting wins per side; unspecified sides keep the
+            // inherited table-style value (including explicit `nil` markers).
+            borders = resolved.borders.overlay(localBorders),
+            insideBorders = localInsideBorders ?: resolved.insideBorders,
+            cellMargins = mergeNullable(resolved.cellMargins, localMargins),
             shading = tblPr?.wFirst("shd")?.let {
-                Shading(fill = it.wAttr("fill"), color = it.wAttr("color"))
+                Shading(
+                    fill = it.wAttr("fill")?.takeUnless { v -> v.equals("auto", true) },
+                    color = it.wAttr("color")?.takeUnless { v -> v.equals("auto", true) }
+                )
             } ?: resolved.shading,
             layout = tblPr?.wFirst("tblLayout")?.wAttr("type") ?: resolved.layout,
             caption = tblPr?.wFirst("tblCaption")?.wAttr("val") ?: resolved.caption,
@@ -57,6 +69,13 @@ class DocxTableMapper(
             rows = rows,
             anchor = SourceAnchor(context.part, "w:tbl")
         )
+    }
+
+    /** Per-side merge for nullable [CellBorders] (cell margins). */
+    private fun mergeNullable(base: CellBorders?, over: CellBorders?): CellBorders? = when {
+        over == null -> base
+        base == null -> over
+        else -> base.overlay(over)
     }
 
     private fun parseRow(row: Element): BlockNode.TableRow {
@@ -145,7 +164,10 @@ class DocxTableMapper(
             borders = DocxBorderProperties.parseCellBorders(tcPr?.wFirst("tcBorders")),
             margins = DocxBorderProperties.parseCellMargins(tcPr?.wFirst("tcMar")),
             shading = tcPr?.wFirst("shd")?.let {
-                Shading(fill = it.wAttr("fill"), color = it.wAttr("color"))
+                Shading(
+                    fill = it.wAttr("fill")?.takeUnless { v -> v.equals("auto", true) },
+                    color = it.wAttr("color")?.takeUnless { v -> v.equals("auto", true) }
+                )
             },
             verticalAlign = when (tcPr?.wFirst("vAlign")?.wAttr("val")?.lowercase()) {
                 "top" -> VerticalCellAlign.TOP

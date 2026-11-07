@@ -42,7 +42,14 @@ class OdtStyleParser {
             isBold = props.getAttributeNS(foNs, "font-weight") == "bold"
             isItalic = props.getAttributeNS(foNs, "font-style") == "italic"
             isUnderline = props.hasAttributeNS(styleNs, "text-underline-style")
-            color = props.getAttributeNS(foNs, "color").takeIf { it.startsWith("#") }?.removePrefix("#")
+            // Keep the raw ODF colour token (`#hex`, `rgb()`, named colour);
+            // `auto`/`transparent` mean "no authored colour". Downstream
+            // DocumentTextColorResolver normalises every accepted form.
+            color = props.getAttributeNS(foNs, "color").takeIf {
+                it.isNotBlank() &&
+                    !it.equals("auto", true) &&
+                    !it.equals("transparent", true)
+            }
             fontSize = props.getAttributeNS(foNs, "font-size").removeSuffix("pt").toFloatOrNull()
         }
 

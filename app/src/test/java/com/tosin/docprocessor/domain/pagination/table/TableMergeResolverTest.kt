@@ -64,6 +64,63 @@ class TableMergeResolverTest {
     }
 
     @Test
+    fun `explicit hMerge continuations collapse into the anchor`() {
+        fun hCell(text: String, hMerge: String?) = RichTableCell(
+            spans = listOf(TextSpan(text)),
+            metadata = TableCellMetadata(horizontalMerge = hMerge),
+            colSpan = 1
+        )
+
+        val input = listOf(
+            listOf(
+                hCell("wide", "restart"),
+                hCell("ignored 1", "continue"),
+                hCell("ignored 2", "continue"),
+                hCell("tail", null)
+            )
+        )
+        val resolved = TableMergeResolver.resolve(input)
+
+        assertEquals(1, resolved.size)
+        assertEquals(2, resolved[0].size)
+        assertEquals(3, resolved[0][0].colSpan)
+        assertEquals("wide", resolved[0][0].spans.single().text)
+        assertEquals(1, resolved[0][1].colSpan)
+        assertEquals("tail", resolved[0][1].spans.single().text)
+    }
+
+    @Test
+    fun `mixed horizontal and vertical merges resolve independently`() {
+        fun hCell(text: String, hMerge: String?, vMerge: String? = null) = RichTableCell(
+            spans = listOf(TextSpan(text)),
+            metadata = TableCellMetadata(horizontalMerge = hMerge, verticalMerge = vMerge),
+            colSpan = 1
+        )
+
+        val input = listOf(
+            listOf(
+                hCell("wide anchor", "restart", vMerge = "restart"),
+                hCell("ignored", "continue"),
+                hCell("r1", null)
+            ),
+            listOf(
+                hCell("wide cont", "restart", vMerge = "continue"),
+                hCell("ignored", "continue"),
+                hCell("r2", null)
+            )
+        )
+        val resolved = TableMergeResolver.resolve(input)
+
+        assertEquals(2, resolved.size)
+        assertEquals(2, resolved[0][0].colSpan)
+        assertEquals(2, resolved[0][0].rowSpan)
+        assertTrue(resolved[1][0].isCovered)
+        assertEquals(2, resolved[1].size)
+        assertEquals(1, resolved[1].last().colSpan)
+        assertFalse(resolved[1].last().isCovered)
+    }
+
+    @Test
     fun `three-row vertical merge computes rowSpan of 3`() {
         val input = listOf(
             listOf(cell("Anchor", vMerge = "restart"), cell("R1")),

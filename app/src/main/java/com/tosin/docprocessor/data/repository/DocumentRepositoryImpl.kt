@@ -111,9 +111,19 @@ class DocumentRepositoryImpl @Inject constructor(
         inputStream: java.io.InputStream,
         mimeType: String
     ): List<DocumentElement> {
+        val bytes = inputStream.readBytes()
+        val richParser = parserFactory.createRichParser(bytes, mimeType)
+        if (richParser != null) {
+            val report = runCatching {
+                richParser.parseWithReport(java.io.ByteArrayInputStream(bytes)).getOrNull()
+            }.getOrNull()
+            if (report != null) {
+                return materializeResources(report).content
+            }
+        }
         val parser = parserFactory.createLegacyParser(mimeType)
-        return parser?.parse(inputStream)?.getOrThrow()
-            ?: plainTextDocument(inputStream.bufferedReader().use { it.readText() })
+        return parser?.parse(java.io.ByteArrayInputStream(bytes))?.getOrThrow()
+            ?: plainTextDocument(bytes.toString(Charsets.UTF_8))
     }
 
     /** Rich parse path: returns the full [ParseResult] with diagnostics and the legacy projection. */
@@ -151,7 +161,7 @@ class DocumentRepositoryImpl @Inject constructor(
     }
 
     private fun plainTextDocument(text: String): List<DocumentElement> =
-        listOf(DocumentElement.Paragraph(spans = listOf(TextSpan(text = text, color = "000000"))))
+        listOf(DocumentElement.Paragraph(spans = listOf(TextSpan(text = text))))
 
     private suspend fun writeDocument(
         document: ParsedDocument,

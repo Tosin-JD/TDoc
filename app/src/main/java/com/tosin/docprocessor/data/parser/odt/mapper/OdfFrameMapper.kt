@@ -124,7 +124,12 @@ class OdfFrameMapper(private val context: OdfMapContext) {
             else Units.parseOdfLength(frame.attrNs(Ns.SVG, "y")),
         rotationDegrees = rotationOf(frame),
         wrapStyle = wrapStyleOf(frame),
-        zOrder = frame.attrNs(Ns.DRAW, "z-index")?.toIntOrNull()
+        zOrder = frame.attrNs(Ns.DRAW, "z-index")?.toIntOrNull(),
+        // ODF paint attributes producers may place directly on the frame or
+        // inside its graphic-properties style; absent values stay null.
+        fillColor = frame.attrNs(Ns.DRAW, "fill-color")
+            ?: frame.attrNs(Ns.FO, "background-color"),
+        strokeColor = frame.attrNs(Ns.DRAW, "stroke-color")
     )
 
     /** ODF rotation arrives as part of `draw:transform` (`rotate(x)` in degrees). */

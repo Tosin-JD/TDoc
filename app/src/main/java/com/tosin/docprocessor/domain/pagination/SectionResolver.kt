@@ -33,7 +33,8 @@ class SectionResolver {
             marginRight = section.margins.right?.let { twipsToPt(it) } ?: 72f,
             marginBottom = section.margins.bottom?.let { twipsToPt(it) } ?: 72f,
             headerEdgePt = section.headerEdge?.let { twipsToPt(it) } ?: 36f,
-            footerEdgePt = section.footerEdge?.let { twipsToPt(it) } ?: 36f
+            footerEdgePt = section.footerEdge?.let { twipsToPt(it) } ?: 36f,
+            pageBackground = section.pageBackground
         )
     }
 }

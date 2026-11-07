@@ -20,7 +20,9 @@ data class DocumentColorTokens(
     val tableCellBorder: Int,
     val tableZebraBackground: Int,
     val placeholderBackground: Int,
-    val placeholderBorder: Int
+    val placeholderBorder: Int,
+    /** Themed hyperlink colour for runs that carry link data but no authored colour. */
+    val linkColor: Int = 0xFF1155CC.toInt()
 ) {
     companion object {
         val Light = DocumentColorTokens(
@@ -35,7 +37,8 @@ data class DocumentColorTokens(
             tableCellBorder = 0xFFB0B0B0.toInt(),
             tableZebraBackground = 0xFFF7F7F7.toInt(),
             placeholderBackground = 0xFFDADADA.toInt(),
-            placeholderBorder = 0xFF8A8A8A.toInt()
+            placeholderBorder = 0xFF8A8A8A.toInt(),
+            linkColor = 0xFF1155CC.toInt()
         )
 
         val Dark = DocumentColorTokens(
@@ -50,7 +53,8 @@ data class DocumentColorTokens(
             tableCellBorder = 0xFF5A5A5A.toInt(),
             tableZebraBackground = 0xFF2E2E2E.toInt(),
             placeholderBackground = 0xFF3A3A3A.toInt(),
-            placeholderBorder = 0xFF9A9A9A.toInt()
+            placeholderBorder = 0xFF9A9A9A.toInt(),
+            linkColor = 0xFF8AB4F8.toInt()
         )
     }
 }

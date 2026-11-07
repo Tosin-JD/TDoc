@@ -2,10 +2,11 @@ package com.tosin.docprocessor.ui.editor.layouts.print
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,12 +24,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.tosin.docprocessor.core.color.DocumentColorTokens
+import com.tosin.docprocessor.core.color.DocumentTextColorResolver
 import com.tosin.docprocessor.core.rendering.PrintElementRenderer
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.layout.PageModel
@@ -62,10 +65,21 @@ fun PageView(
     // Page, label and edit-field colours come from the same resolved theme as
     // the chrome; no hardcoded black/white in the page surface.
     val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
+    // Document-authored page fill (`w:background`/ODF) resolved for the
+    // current theme; absent shading keeps the theme page colour.
+    val resolvedPageColor = DocumentTextColorResolver.resolveBackgroundColor(
+        pageModel.dimensions.pageBackground, tokens, isDarkMode, tokens.pageBackground
+    )?.let { Color(it) }
+        ?: Color(tokens.pageBackground)
     val pageColor by animateColorAsState(
-        targetValue = Color(tokens.pageBackground),
+        targetValue = resolvedPageColor,
         label = "print-page"
     )
+    val pageBorderColor = DocumentTextColorResolver.resolveBorderColor(
+        pageModel.dimensions.pageBorderColor, tokens, isDarkMode,
+        resolvedPageColor.toArgb()
+    ).let { Color(it) }
+        .takeIf { pageModel.dimensions.pageBorderColor != null }
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
@@ -84,14 +98,23 @@ fun PageView(
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
-            Surface(
-                modifier = Modifier
-                    .width(pageWidth)
-                    .aspectRatio(pageAspectRatio),
-                color = pageColor,
-                shape = RectangleShape,
-                shadowElevation = 6.dp
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.width(pageWidth)
             ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(pageAspectRatio)
+                        .then(
+                            pageBorderColor?.let {
+                                Modifier.border(1.dp, it, RectangleShape)
+                            } ?: Modifier
+                        ),
+                    color = pageColor,
+                    shape = RectangleShape,
+                    shadowElevation = 6.dp
+                ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -181,16 +204,15 @@ fun PageView(
                             )
                         }
                     }
-
-                    Text(
-                        text = "Page ${pageModel.index + 1} of $pageCount",
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(PaddingValues(bottom = 8.dp)),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(tokens.secondaryText)
-                    )
+                    }
                 }
+
+                Text(
+                    text = "Page ${pageModel.index + 1} of $pageCount",
+                    modifier = Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(tokens.secondaryText)
+                )
             }
         }
     }

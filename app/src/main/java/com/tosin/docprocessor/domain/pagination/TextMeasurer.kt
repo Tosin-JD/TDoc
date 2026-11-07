@@ -40,9 +40,10 @@ class TextMeasurer(
         style: ParagraphStyle,
         widthPt: Float,
         indentation: ElementIndentation = ElementIndentation(),
-        isDarkMode: Boolean = false
+        isDarkMode: Boolean = false,
+        backgroundArgb: Int? = null
     ): Float {
-        val layout = buildParagraphLayout(spans, style, widthPt, indentation, isDarkMode) ?: return 0f
+        val layout = buildParagraphLayout(spans, style, widthPt, indentation, isDarkMode, backgroundArgb) ?: return 0f
         return unitConverter.pxToPt(layout.height.toFloat())
     }
 
@@ -74,9 +75,10 @@ class TextMeasurer(
         widthPt: Float,
         maxHeightPt: Float,
         indentation: ElementIndentation = ElementIndentation(),
-        isDarkMode: Boolean = false
+        isDarkMode: Boolean = false,
+        backgroundArgb: Int? = null
     ): Int {
-        val layout = buildParagraphLayout(spans, style, widthPt, indentation, isDarkMode) ?: return -1
+        val layout = buildParagraphLayout(spans, style, widthPt, indentation, isDarkMode, backgroundArgb) ?: return -1
         val maxHeightPx = unitConverter.ptToPx(maxHeightPt).toInt().coerceAtLeast(0)
         var line = layout.getLineForVertical(maxHeightPx)
 
@@ -92,7 +94,8 @@ class TextMeasurer(
         style: ParagraphStyle,
         widthPt: Float,
         indentation: ElementIndentation = ElementIndentation(),
-        isDarkMode: Boolean = false
+        isDarkMode: Boolean = false,
+        backgroundArgb: Int? = null
     ): StaticLayout? {
         if (spans.isEmpty()) return null
 
@@ -107,7 +110,8 @@ class TextMeasurer(
             fontResolver = fontResolver,
             tokens = tokens,
             isDarkMode = isDarkMode,
-            sizeToPx = { pt -> unitConverter.ptToPx(pt).toInt().coerceAtLeast(1) }
+            sizeToPx = { pt -> unitConverter.ptToPx(pt).toInt().coerceAtLeast(1) },
+            backgroundArgb = backgroundArgb
         )
         if (text.isEmpty()) return null
 
@@ -192,7 +196,7 @@ class TextMeasurer(
         )
         return nativeTextMeasurer.measureWidth(text, key)
     }
-    
+
     fun clearCache() {
         AndroidTypefaceMapper.clearCache()
         paintCache.clear()

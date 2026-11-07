@@ -1,6 +1,8 @@
 package com.tosin.docprocessor.domain.pagination
 
 import android.graphics.RectF
+import com.tosin.docprocessor.core.color.DocumentColorTokens
+import com.tosin.docprocessor.core.color.DocumentTextColorResolver
 import com.tosin.docprocessor.domain.model.DocumentData
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.model.layout.ElementIndentation
@@ -17,6 +19,7 @@ import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
 import com.tosin.docprocessor.data.parser.internal.models.RichTableCell
+import com.tosin.docprocessor.domain.rendering.table.splitForContinuation
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import com.tosin.docprocessor.domain.document.model.style.CellBorders
 import com.tosin.docprocessor.domain.document.model.style.TextAlignment
@@ -53,14 +56,8 @@ class PrintPaginator(
     override fun paginate(
         data: DocumentData,
         dimensions: PageDimensions,
-        startIndex: Int
-    ): List<PageModel> = paginate(data, dimensions, startIndex, isDarkMode = false)
-
-    fun paginate(
-        data: DocumentData,
-        dimensions: PageDimensions,
-        startIndex: Int = 0,
-        isDarkMode: Boolean = false
+        startIndex: Int,
+        isDarkMode: Boolean
     ): List<PageModel> {
         val headerFooterElements = data.content.filterIsInstance<DocumentElement.HeaderFooter>()
         val headers = headerFooterElements.filter { it.content.kind == HeaderFooterKind.HEADER }
@@ -192,12 +189,26 @@ class PrintPaginator(
         isDarkMode: Boolean
     ): PositionedElement {
         val bounds = RectF(rect.left, rect.top, rect.right, rect.bottom)
+        // Prefer the story's styled runs so header/footer text keeps its
+        // authored colours (resolved against the page like body text); fall
+        // back to the flattened plain-text layout for legacy content.
+        val layoutResult = element.content.spans
+            .takeIf { it.isNotEmpty() }
+            ?.let {
+                textMeasurer.buildParagraphLayout(
+                    spans = it,
+                    style = ParagraphStyle(),
+                    widthPt = rect.width(),
+                    isDarkMode = isDarkMode
+                )?.let { layout -> LayoutResult.TextLayout(layout) }
+            }
+            ?: buildTextLayoutResult(element.content.text, rect.width(), isDarkMode)
         return PositionedElement(
             elementId = element.id,
             element = element,
             pageIndex = pageIndex,
             bounds = bounds,
-            layoutResult = buildTextLayoutResult(element.content.text, rect.width(), isDarkMode)
+            layoutResult = layoutResult
         )
     }
 
@@ -430,17 +441,25 @@ class PrintPaginator(
         val (firstRows, remainingRows) = splitRows(element.rows)
         val (firstRichRows, remainingRichRows) = splitRows(element.richRows)
         val (firstRowHeights, remainingRowHeights) = splitRows(element.rowHeightsPt)
+        // The resolved presentation describes every source row; slice it with
+        // the same row split (including header repetition) so continuation
+        // fragments index the correct row's borders/shading/margins.
+        val (firstPresentation, remainingPresentation) = element.presentation
+            ?.splitForContinuation(rowsThatFit, element.hasHeader)
+            ?: (null to null)
 
         return Pair(
             element.copy(
                 rows = firstRows,
                 richRows = firstRichRows,
-                rowHeightsPt = firstRowHeights
+                rowHeightsPt = firstRowHeights,
+                presentation = firstPresentation
             ),
             element.copy(
                 rows = remainingRows,
                 richRows = remainingRichRows,
-                rowHeightsPt = remainingRowHeights
+                rowHeightsPt = remainingRowHeights,
+                presentation = remainingPresentation
             )
         )
     }
@@ -598,12 +617,23 @@ class PrintPaginator(
             ?.let { spacingResolver.resolve(it.style.spacing).beforePt }
             ?: 0f
 
-        val bounds = RectF(
-            dimensions.marginLeft + indent.leftPt,
-            yPositionPt + paragraphSpacingBefore,
-            dimensions.marginLeft + dimensions.printableWidth - indent.rightPt,
-            yPositionPt + elementHeight
-        )
+        val layoutResult = createLayoutResult(element, dimensions, indent, isDarkMode)
+
+        val bounds = when (element) {
+            is DocumentElement.Table -> tableBounds(
+                element = element,
+                layoutResult = layoutResult,
+                dimensions = dimensions,
+                yTop = yPositionPt + paragraphSpacingBefore,
+                yBottom = yPositionPt + elementHeight
+            )
+            else -> RectF(
+                dimensions.marginLeft + indent.leftPt,
+                yPositionPt + paragraphSpacingBefore,
+                dimensions.marginLeft + dimensions.printableWidth - indent.rightPt,
+                yPositionPt + elementHeight
+            )
+        }
 
         pageElements.add(
             PositionedElement(
@@ -613,7 +643,7 @@ class PrintPaginator(
                 bounds = bounds,
                 indentation = indent,
                 metadata = mapOf("originalHeight" to elementHeight),
-                layoutResult = createLayoutResult(element, dimensions, indent, isDarkMode),
+                layoutResult = layoutResult,
                 logicalElementId = logicalElementId,
                 fragmentIndex = fragmentIndex,
                 isFragment = isFragment,
@@ -621,6 +651,34 @@ class PrintPaginator(
                 charEnd = charEnd
             )
         )
+    }
+
+    /**
+     * Bounds for a table element honouring its document-authored width and
+     * alignment: a table narrower than the printable area is sized to its
+     * resolved width and aligned start/center/end like Word's `w:jc`.
+     */
+    private fun tableBounds(
+        element: DocumentElement.Table,
+        layoutResult: LayoutResult,
+        dimensions: PageDimensions,
+        yTop: Float,
+        yBottom: Float
+    ): RectF {
+        val laidOutWidth = (layoutResult as? LayoutResult.TableLayout)?.layout?.widthPt
+            ?: dimensions.printableWidth
+        val availableLeft = dimensions.marginLeft
+        val availableRight = dimensions.marginLeft + dimensions.printableWidth
+        val width = laidOutWidth.coerceIn(0f, dimensions.printableWidth)
+        val (left, right) = when (element.presentation?.alignment ?: element.metadata.alignment) {
+            TextAlignment.CENTER -> {
+                val start = availableLeft + (dimensions.printableWidth - width) / 2f
+                start to start + width
+            }
+            TextAlignment.END -> (availableRight - width) to availableRight
+            else -> availableLeft to availableLeft + width
+        }
+        return RectF(left, yTop, right, yBottom)
     }
 
     private fun createLayoutResult(
@@ -752,13 +810,21 @@ class PrintPaginator(
         val effectiveWidth = (widthPt - indentation.leftPt - indentation.rightPt)
             .coerceAtLeast(minTableColumnWidthPt)
 
+        // Document-authored table width (`w:tblW`/ODF width) wins when it is
+        // narrower than the printable area; wider tables scale down to fit
+        // instead of clipping, matching Word's fixed-width behaviour.
+        val authoredWidthPt = element.presentation?.widthPoints
+            ?.toFloat()
+            ?.takeIf { it > 0f }
+        val targetWidth = authoredWidthPt?.coerceAtMost(effectiveWidth) ?: effectiveWidth
+
         val columnCount = tableColumnCount(element)
         val grid = element.gridColumnWidthsPt
         val columnWidthsPt = if (grid.size == columnCount && grid.sum() > 0f) {
-            val scale = effectiveWidth / grid.sum()
-            allocateColumnWidths(grid.map { it * scale }, effectiveWidth)
+            val scale = targetWidth / grid.sum()
+            allocateColumnWidths(grid.map { it * scale }, targetWidth)
         } else {
-            calculateColumnWidths(element, effectiveWidth, columnCount)
+            calculateColumnWidths(element, targetWidth, columnCount)
         }
 
         val rowCount = maxOf(element.rows.size, element.richRows.size, 1)
@@ -813,7 +879,8 @@ class PrintPaginator(
             columnCount = columnCount,
             rowLayouts = rowLayouts,
             cellPaddingPt = tableCellPaddingPt,
-            gridColumnWidthsPt = columnWidthsPt
+            gridColumnWidthsPt = columnWidthsPt,
+            widthPt = targetWidth
         )
     }
 
@@ -857,11 +924,7 @@ class PrintPaginator(
                 val layout = if (richCell.isCovered) {
                     null
                 } else {
-                    val spans = if (element.hasHeader && rowIndex == 0) {
-                        richCell.spans.map { it.copy(isBold = true) }
-                    } else {
-                        richCell.spans
-                    }
+                    val spans = richCell.spans
                     if (spans.isEmpty()) {
                         null
                     } else {
@@ -869,7 +932,10 @@ class PrintPaginator(
                             spans = spans,
                             style = ParagraphStyle(alignment = richCell.horizontalAlignment.toParagraphAlignment()),
                             widthPt = contentWidthPt,
-                            isDarkMode = isDarkMode
+                            isDarkMode = isDarkMode,
+                            backgroundArgb = cellTextBackgroundArgb(
+                                element, rowIndex, column, isDarkMode
+                            )
                         )
                     }
                 }
@@ -918,7 +984,7 @@ class PrintPaginator(
                 textMeasurer.buildPlainTextLayout(
                     text = text,
                     fontSize = 9f,
-                    isBold = element.hasHeader && rowIndex == 0,
+                    isBold = false,
                     widthPt = contentWidthPt,
                     isDarkMode = isDarkMode
                 )
@@ -934,7 +1000,65 @@ class PrintPaginator(
             )
         }
 
+        applyResolvedPresentation(element, rowIndex, output)
         return output.map { it ?: TableCellLayout("", columnWidthsPt[0], 0f, null) }
+    }
+
+    /**
+     * Effective background behind a table cell's text, resolved through the
+     * same dark-mode pipeline the renderer paints with: cell fill → table
+     * fill → page. Text colours are contrast-checked against this value when
+     * the [StaticLayout] is baked, so dark authored fills don't swallow text.
+     */
+    private fun cellTextBackgroundArgb(
+        element: DocumentElement.Table,
+        rowIndex: Int,
+        column: Int,
+        isDarkMode: Boolean
+    ): Int {
+        val tokens = if (isDarkMode) DocumentColorTokens.Dark else DocumentColorTokens.Light
+        val pageBg = tokens.pageBackground
+
+        val tableFillSource = element.presentation?.shading?.fill
+            ?: element.metadata.shadingColor
+        val tableFill = DocumentTextColorResolver.resolveBackgroundColor(
+            tableFillSource, tokens, isDarkMode, pageBg
+        )
+        val underCell = tableFill ?: pageBg
+
+        val cellFillSource = element.presentation?.rows?.getOrNull(rowIndex)
+            ?.cells?.firstOrNull { it.columnIndex == column && !it.isCovered }
+            ?.shading?.fill
+        val cellFill = DocumentTextColorResolver.resolveBackgroundColor(
+            cellFillSource, tokens, isDarkMode, underCell
+        )
+        return cellFill ?: underCell
+    }
+
+    /**
+     * Overlays the shared resolved [com.tosin.docprocessor.domain.rendering.table.TablePresentation]
+     * onto the measured cells so print paints the same document-authored
+     * shading, borders, margins and alignment as the mobile renderer.
+     */
+    private fun applyResolvedPresentation(
+        element: DocumentElement.Table,
+        rowIndex: Int,
+        output: MutableList<TableCellLayout?>
+    ) {
+        val presentationRow = element.presentation?.rows?.getOrNull(rowIndex) ?: return
+        for (column in output.indices) {
+            val resolved = presentationRow.cells.getOrNull(column) ?: continue
+            if (resolved.isCovered) continue
+            val existing = output[column] ?: continue
+            if (existing.isCovered) continue
+            output[column] = existing.copy(
+                backgroundColor = resolved.shading?.fill ?: existing.backgroundColor,
+                borders = resolved.borders.takeIf { it.hasAny() } ?: existing.borders,
+                paintBorders = resolved.paintBorders,
+                margins = resolved.margins.takeIf { it.hasAny() } ?: existing.margins,
+                verticalAlignment = resolved.verticalAlign ?: existing.verticalAlignment
+            )
+        }
     }
 
     private fun horizontalPadding(value: Float?): Float =

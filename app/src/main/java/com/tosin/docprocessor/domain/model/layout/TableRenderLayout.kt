@@ -9,7 +9,9 @@ data class TableRenderLayout(
     val rowLayouts: List<TableRowLayout>,
     val cellPaddingPt: Float,
     /** Resolved column widths in points (from grid or heuristic). */
-    val gridColumnWidthsPt: List<Float> = emptyList()
+    val gridColumnWidthsPt: List<Float> = emptyList(),
+    /** Total table width in points the columns were laid out for. */
+    val widthPt: Float = 0f
 ) {
     val totalHeightPt: Float
         get() = rowLayouts.sumOf { it.heightPt.toDouble() }.toFloat()
@@ -36,6 +38,12 @@ data class TableCellLayout(
     val backgroundColor: String? = null,
     /** Explicit cell borders. */
     val borders: CellBorders? = null,
+    /**
+     * Shared-edge ownership-filtered borders from the resolved presentation.
+     * When non-null the renderer paints exactly these edges (no table-level
+     * fallback); null means the legacy `borders`/table fallback applies.
+     */
+    val paintBorders: CellBorders? = null,
     /** Explicit cell padding/margins in points. */
     val margins: CellBorders? = null,
     /** Vertical alignment within cell. */

@@ -105,17 +105,35 @@ class DocumentTextStyleMapper(
         )
     }
 
-    private fun TextSpan.toSpanStyle(tokens: DocumentColorTokens, isDarkMode: Boolean, scale: Float): SpanStyle {
-        val resolvedColor = Color(DocumentTextColorResolver.resolveTextColor(color, tokens, isDarkMode))
-        val background = highlightColor
-            ?.let { DocumentTextColorResolver.parseColorString(it) }
-            ?.let { Color(it) }
-            ?: Color.Unspecified
+    private fun TextSpan.toSpanStyle(
+        tokens: DocumentColorTokens,
+        isDarkMode: Boolean,
+        scale: Float
+    ): SpanStyle {
+        // Effective background behind this run: own highlight wins, then the
+        // run's shading, then the page. Text colour is contrast-checked
+        // against it so authored colours stay readable on both themes.
+        val highlightArgb = highlightColor
+            ?.let { DocumentTextColorResolver.resolveHighlightColor(it, tokens, isDarkMode, tokens.pageBackground) }
+        val shadingArgb = shading?.fill
+            ?.let { DocumentTextColorResolver.resolveBackgroundColor(it, tokens, isDarkMode, tokens.pageBackground) }
+        val backgroundArgb = highlightArgb ?: shadingArgb ?: tokens.pageBackground
+        // Unstyled links take the themed link colour (same convention as the
+        // print renderer); authored colours still win.
+        val effectiveColor = if (hyperlink != null && color == null) null else color
+        val resolvedColor = if (hyperlink != null && color == null) {
+            Color(tokens.linkColor)
+        } else {
+            Color(
+                DocumentTextColorResolver.resolveTextColor(effectiveColor, tokens, isDarkMode, backgroundArgb)
+            )
+        }
+        val background = (highlightArgb ?: shadingArgb)?.let { Color(it) } ?: Color.Unspecified
         val decoration = when {
             isUnderline && isStrikethrough -> TextDecoration.combine(
                 listOf(TextDecoration.Underline, TextDecoration.LineThrough)
             )
-            isUnderline -> TextDecoration.Underline
+            isUnderline || hyperlink != null -> TextDecoration.Underline
             isStrikethrough -> TextDecoration.LineThrough
             else -> null
         }

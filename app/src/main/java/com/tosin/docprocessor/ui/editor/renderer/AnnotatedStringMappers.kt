@@ -13,6 +13,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import com.tosin.docprocessor.core.color.DocumentColorTokens
+import com.tosin.docprocessor.core.color.DocumentTextColorResolver
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
 import com.tosin.docprocessor.domain.model.DocumentElement
 import java.util.Locale
@@ -25,6 +27,29 @@ object AnnotatedStringMappers {
         }
         spans.forEach { span ->
             withStyle(span.toComposeStyle()) { append(span.text) }
+        }
+    }
+
+    /**
+     * Builds an [AnnotatedString] from raw document spans. Used by rich content
+     * surfaces (tables, headers) that are not a [DocumentElement.Paragraph].
+     */
+    fun spansToAnnotatedString(spans: List<TextSpan>): AnnotatedString =
+        spansToAnnotatedString(spans, DocumentColorTokens.Light, isDarkMode = false)
+
+    /**
+     * Theme-aware variant: run colours/highlights are contrast-resolved against
+     * [backgroundArgb] (the effective local background — e.g. a table cell fill)
+     * so authored colours stay readable in both light and dark mode.
+     */
+    fun spansToAnnotatedString(
+        spans: List<TextSpan>,
+        tokens: DocumentColorTokens,
+        isDarkMode: Boolean,
+        backgroundArgb: Int = tokens.pageBackground
+    ): AnnotatedString = buildAnnotatedString {
+        spans.forEach { span ->
+            withStyle(span.toComposeStyle(tokens, isDarkMode, backgroundArgb)) { append(span.text) }
         }
     }
 
@@ -150,39 +175,42 @@ object AnnotatedStringMappers {
 
     private fun TextSpan.sameStyle(other: TextSpan): Boolean = copy(text = "") == other.copy(text = "")
 
-    private fun TextSpan.toComposeStyle(): SpanStyle = SpanStyle(
-        color = parseColor(color) ?: Color.Unspecified,
-        fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
-        fontStyle = if (isItalic) FontStyle.Italic else FontStyle.Normal,
-        fontSize = fontSize?.sp ?: TextUnit.Unspecified,
-        textDecoration = when {
-            isUnderline && isStrikethrough -> TextDecoration.combine(
-                listOf(TextDecoration.Underline, TextDecoration.LineThrough)
-            )
-            isUnderline -> TextDecoration.Underline
-            isStrikethrough -> TextDecoration.LineThrough
-            else -> null
-        },
-        background = parseColor(highlightColor) ?: Color.Unspecified,
-        baselineShift = when {
-            isSuperscript -> BaselineShift.Superscript
-            isSubscript -> BaselineShift.Subscript
-            else -> null
-        }
-    )
+    private fun TextSpan.toComposeStyle(): SpanStyle =
+        toComposeStyle(DocumentColorTokens.Light, isDarkMode = false)
 
-    private fun parseColor(value: String?): Color? {
-        val hex = value?.removePrefix("#")?.toLongOrNull(16) ?: return null
-        val argb = when (value.removePrefix("#").length) {
-            6 -> 0xFF000000L or hex
-            8 -> hex
-            else -> null
-        } ?: return null
-        return Color(
-            red = ((argb shr 16) and 0xFF).toFloat() / 255f,
-            green = ((argb shr 8) and 0xFF).toFloat() / 255f,
-            blue = (argb and 0xFF).toFloat() / 255f,
-            alpha = ((argb shr 24) and 0xFF).toFloat() / 255f
+    private fun TextSpan.toComposeStyle(
+        tokens: DocumentColorTokens,
+        isDarkMode: Boolean,
+        backgroundArgb: Int = tokens.pageBackground
+    ): SpanStyle {
+        val highlightArgb = highlightColor?.let {
+            DocumentTextColorResolver.resolveHighlightColor(it, tokens, isDarkMode, backgroundArgb)
+        }
+        val effectiveBackground = highlightArgb ?: backgroundArgb
+        val resolvedColor = if (hyperlink != null && color == null) {
+            tokens.linkColor
+        } else {
+            DocumentTextColorResolver.resolveTextColor(color, tokens, isDarkMode, effectiveBackground)
+        }
+        return SpanStyle(
+            color = Color(resolvedColor),
+            fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
+            fontStyle = if (isItalic) FontStyle.Italic else FontStyle.Normal,
+            fontSize = fontSize?.sp ?: TextUnit.Unspecified,
+            textDecoration = when {
+                isUnderline && isStrikethrough -> TextDecoration.combine(
+                    listOf(TextDecoration.Underline, TextDecoration.LineThrough)
+                )
+                isUnderline || hyperlink != null -> TextDecoration.Underline
+                isStrikethrough -> TextDecoration.LineThrough
+                else -> null
+            },
+            background = highlightArgb?.let { Color(it) } ?: Color.Unspecified,
+            baselineShift = when {
+                isSuperscript -> BaselineShift.Superscript
+                isSubscript -> BaselineShift.Subscript
+                else -> null
+            }
         )
     }
 }

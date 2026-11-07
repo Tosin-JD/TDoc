@@ -109,8 +109,10 @@ fun PrintLayout(
         }
     }
 
-    // Debounced pagination (300 ms) to avoid thrashing on keystrokes
-    LaunchedEffect(documentData) {
+    // Debounced pagination (300 ms) to avoid thrashing on keystrokes.
+    // isDarkMode is a key: baked text colours must be rebuilt when the theme
+    // flips or dark-mode pages would keep light-mode (invisible) text.
+    LaunchedEffect(documentData, isDarkMode) {
         delay(300)
         val result = withContext(Dispatchers.Default) {
             val sections = documentData.content.filterIsInstance<DocumentElement.Section>()
@@ -120,7 +122,7 @@ fun PrintLayout(
                 PageDimensions.Default
             }
 
-            paginator.paginate(documentData, defaultDimensions)
+            paginator.paginate(documentData, defaultDimensions, isDarkMode = isDarkMode)
         }
         // Generate stable keys for pages
         val pagesWithKeys = result.mapIndexed { idx, page ->

@@ -16,7 +16,11 @@ data class PageDimensions(
     /** Distance from the top edge of the sheet to the top of header content (Word: `w:pgMar w:header`). */
     val headerEdgePt: Float = 36f,
     /** Distance from the bottom edge of the sheet to the bottom of footer content (Word: `w:pgMar w:footer`). */
-    val footerEdgePt: Float = 36f
+    val footerEdgePt: Float = 36f,
+    /** Document-authored page background colour (hex/`rgb()`/named); null = theme page colour. */
+    val pageBackground: String? = null,
+    /** Document-authored page border colour (hex/named); null = theme edge only. */
+    val pageBorderColor: String? = null
 ) {
     val printableWidth: Float get() = width - marginLeft - marginRight
     val printableHeight: Float get() = height - marginTop - marginBottom
@@ -65,4 +69,3 @@ data class PageDimensions(
         val Executive = PageDimensions(width = 540f, height = 720f)
     }
 }
-

@@ -40,7 +40,11 @@ object DocxRunProperties {
             colorThemeShade = color?.wAttr("themeShade"),
             highlight = rPr.wFirst("highlight")?.wAttr("val"),
             shading = shading?.let {
-                Shading(fill = it.wAttr("fill"), color = it.wAttr("color"), pattern = it.wAttr("val"))
+                Shading(
+                    fill = it.wAttr("fill")?.takeUnless { v -> v.equals("auto", true) },
+                    color = it.wAttr("color")?.takeUnless { v -> v.equals("auto", true) },
+                    pattern = it.wAttr("val")
+                )
             },
             caps = onOff(rPr.wFirst("caps")),
             smallCaps = onOff(rPr.wFirst("smallCaps")),
@@ -119,7 +123,11 @@ object DocxParagraphProperties {
             tabs = parseTabs(pPr.wFirst("tabs")),
             borders = parseBorders(pPr.wFirst("pBdr")),
             shading = pPr.wFirst("shd")?.let {
-                Shading(fill = it.wAttr("fill"), color = it.wAttr("color"), pattern = it.wAttr("val"))
+                Shading(
+                    fill = it.wAttr("fill")?.takeUnless { v -> v.equals("auto", true) },
+                    color = it.wAttr("color")?.takeUnless { v -> v.equals("auto", true) },
+                    pattern = it.wAttr("val")
+                )
             },
             defaultRunStyle = DocxRunProperties.parse(pPr.wFirst("rPr")).takeIf { it != TextStyle() }
         )

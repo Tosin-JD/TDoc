@@ -22,6 +22,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -92,8 +93,12 @@ fun DiagnosticsSheet(
                     Text("No issues found.")
                 }
             } else {
+                // Surface real problems first: errors, then warnings, then mapping info.
+                val ordered = remember(diagnostics) {
+                    diagnostics.sortedByDescending { it.severity.ordinal }
+                }
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(diagnostics) { diagnostic ->
+                    items(ordered) { diagnostic ->
                         DiagnosticRow(diagnostic)
                         HorizontalDivider()
                     }
@@ -105,6 +110,16 @@ fun DiagnosticsSheet(
 
 @Composable
 private fun DiagnosticRow(diagnostic: ParseDiagnostic) {
+    val severityColor = when (diagnostic.severity) {
+        ParseDiagnostic.Severity.ERROR -> MaterialTheme.colorScheme.error
+        ParseDiagnostic.Severity.WARNING -> MaterialTheme.colorScheme.tertiary
+        ParseDiagnostic.Severity.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val severityLabel = when (diagnostic.severity) {
+        ParseDiagnostic.Severity.ERROR -> "Error"
+        ParseDiagnostic.Severity.WARNING -> "Warning"
+        ParseDiagnostic.Severity.INFO -> "Info"
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -118,18 +133,25 @@ private fun DiagnosticRow(diagnostic: ParseDiagnostic) {
                 ParseDiagnostic.Severity.WARNING -> Icons.Default.Warning
                 ParseDiagnostic.Severity.INFO -> Icons.Default.Info
             },
-            contentDescription = diagnostic.severity.name,
-            tint = when (diagnostic.severity) {
-                ParseDiagnostic.Severity.ERROR -> MaterialTheme.colorScheme.error
-                ParseDiagnostic.Severity.WARNING -> MaterialTheme.colorScheme.tertiary
-                ParseDiagnostic.Severity.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
+            contentDescription = severityLabel,
+            tint = severityColor
         )
         Column {
-            Text(
-                text = diagnostic.construct ?: "Document",
-                style = MaterialTheme.typography.titleSmall
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = severityLabel.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = severityColor
+                )
+                Text(
+                    text = diagnostic.construct ?: "Document",
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
             Text(
                 text = diagnostic.message,
                 style = MaterialTheme.typography.bodyMedium,

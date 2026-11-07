@@ -25,10 +25,10 @@ class OdtParagraphParser(
         val spans = mutableListOf<TextSpan>()
         val extraElements = mutableListOf<DocumentElement>()
         collectSpans(element, spans, extraElements)
-        
+
         val styleName = element.getAttributeNS(textNs, "style-name")
         val properties = styles[styleName]
-        
+
         val paragraph = DocumentElement.Paragraph(
             spans = spans,
             listLabel = listItemLabel(element),
@@ -45,7 +45,7 @@ class OdtParagraphParser(
             hyperlink = null,
             listInfo = listInfo
         )
-        
+
         return listOf(paragraph) + extraElements
     }
 
@@ -106,11 +106,11 @@ class OdtParagraphParser(
                             collectSpans(element, output, extraElements, inheritedStyle, link)
                         }
                         "footnote", "endnote" -> {
-                            val kind = if (element.localName == "footnote") 
-                                com.tosin.docprocessor.data.parser.internal.models.NoteKind.FOOTNOTE 
-                            else 
+                            val kind = if (element.localName == "footnote")
+                                com.tosin.docprocessor.data.parser.internal.models.NoteKind.FOOTNOTE
+                            else
                                 com.tosin.docprocessor.data.parser.internal.models.NoteKind.ENDNOTE
-                            
+
                             val body = element.getElementsByTagNameNS(textNs, "${element.localName}-body").item(0) as? Element
                             val text = body?.textContent?.trim().orEmpty()
                             extraElements += DocumentElement.Note(
@@ -149,7 +149,7 @@ class OdtParagraphParser(
         isBold = style?.isBold ?: false,
         isItalic = style?.isItalic ?: false,
         isUnderline = (style?.isUnderline ?: false) || hyperlink != null,
-        color = style?.color ?: if (hyperlink != null) "0000EE" else "000000",
+        color = style?.color,
         fontSize = style?.fontSize,
         hyperlink = hyperlink
     )

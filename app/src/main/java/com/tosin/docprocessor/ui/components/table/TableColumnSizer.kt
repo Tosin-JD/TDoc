@@ -10,8 +10,10 @@ data class TableLayoutResult(
  * Pure, Compose-free column width solver.
  *
  * Behaviour:
- * - When the viewport is wide enough, columns are distributed proportionally to
- *   their content weights and the table fills the available width.
+ * - When [preferredWidthsDp] is supplied (source grid widths converted to
+ *   dp), columns keep those proportions, scaled to the available width.
+ * - Otherwise columns are distributed proportionally to their content
+ *   [columnWeights].
  * - When the viewport is too narrow, every column bottoms out at
  *   [TableLayoutConfig.minColumnWidthDp]; the total then exceeds the viewport
  *   and [TableLayoutResult.requiresScroll] becomes true so the UI can scroll.
@@ -22,18 +24,28 @@ object TableColumnSizer {
     fun compute(
         columnWeights: List<Float>,
         availableWidthDp: Float,
-        config: TableLayoutConfig = TableLayoutConfig.Default
+        config: TableLayoutConfig = TableLayoutConfig.Default,
+        preferredWidthsDp: List<Float>? = null
     ): TableLayoutResult {
         val count = columnWeights.size
         if (count == 0) return TableLayoutResult(emptyList(), 0f, false)
 
         val safeAvailable = availableWidthDp.coerceAtLeast(0f)
-        val weightSum = columnWeights.sum().takeIf { it > 0f } ?: count.toFloat()
         val min = config.minColumnWidthDp
         val max = config.maxColumnWidthDp
 
         val widths = MutableList(count) { index ->
-            val base = safeAvailable * (columnWeights[index] / weightSum)
+            val base = when {
+                preferredWidthsDp != null && preferredWidthsDp.size == count &&
+                    preferredWidthsDp.sum() > 0f -> {
+                    val scale = safeAvailable / preferredWidthsDp.sum()
+                    preferredWidthsDp[index] * scale
+                }
+                else -> {
+                    val weightSum = columnWeights.sum().takeIf { it > 0f } ?: count.toFloat()
+                    safeAvailable * (columnWeights[index] / weightSum)
+                }
+            }
             base.coerceIn(min, max)
         }
         distributeSlack(widths, safeAvailable, max)

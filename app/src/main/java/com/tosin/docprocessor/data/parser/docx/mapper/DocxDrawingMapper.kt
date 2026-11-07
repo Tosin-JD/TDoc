@@ -65,7 +65,7 @@ class DocxDrawingMapper(
             val txbxContent = drawing.descendantsNs(Ns.W, "txbxContent").firstOrNull()
             if (txbxContent != null && blockMapper != null) {
                 context.diagnostics.info("w:drawing", "Mapped shape with text box")
-                return textBox(txbxContent, drawingFrameStyle(anchorNode, extent), "w:txbxContent", blockMapper)
+                return textBox(txbxContent, drawingFrameStyle(drawing, anchorNode, extent), "w:txbxContent", blockMapper)
             }
             context.diagnostics.preserve("w:drawing", "[shape]")
             return InlineNode.Opaque(capture(drawing, SourceAnchor(context.part, "w:drawing"), "shape not rendered"))
@@ -86,7 +86,7 @@ class DocxDrawingMapper(
         context.diagnostics.info("w:drawing", "Mapped drawing/image")
 
         return InlineNode.Drawing(
-            frameStyle = drawingFrameStyle(anchorNode, extent)
+            frameStyle = drawingFrameStyle(drawing, anchorNode, extent)
                 .copy(rotationDegrees = rotationRaw?.let { it / 60_000.0 }),
             resourceId = resourceId,
             altText = docPr?.getAttribute("descr")?.takeIf { it.isNotBlank() }
@@ -96,11 +96,12 @@ class DocxDrawingMapper(
         )
     }
 
-    /** Extent, anchor kind, absolute position, wrap style and z-order of a drawing. */
-    private fun drawingFrameStyle(anchorNode: Element?, extent: Element?): FrameStyle {
+    /** Extent, anchor kind, absolute position, wrap style, z-order and paint colours of a drawing. */
+    private fun drawingFrameStyle(drawing: Element, anchorNode: Element?, extent: Element?): FrameStyle {
         val isInline = anchorNode != null && anchorNode.matchesNs(Ns.WP, "inline")
         val positionH = anchorNode?.firstNs(Ns.WP, "positionH")
         val positionV = anchorNode?.firstNs(Ns.WP, "positionV")
+        val (fill, stroke) = drawingPaintColors(drawing)
         return FrameStyle(
             anchor = if (isInline) FrameAnchor.INLINE else FrameAnchor.ANCHORED,
             // wp:extent/posOffset values are unprefixed attributes → no namespace.
@@ -113,8 +114,53 @@ class DocxDrawingMapper(
                 positionV?.firstNs(Ns.WP, "posOffset")?.textContent?.trim()?.toLongOrNull()
             ),
             wrapStyle = wrapStyleOf(anchorNode),
-            zOrder = anchorNode?.unprefixedLong("relativeHeight")?.toInt()
+            zOrder = anchorNode?.unprefixedLong("relativeHeight")?.toInt(),
+            fillColor = fill,
+            strokeColor = stroke
         )
+    }
+
+    /**
+     * Best-effort shape paint colours: DrawingML `a:spPr` solid fills (shape
+     * fill and `a:ln` outline) resolved through the theme palette, plus VML
+     * `fillcolor`/`strokecolor` style attributes. Gradients and pattern fills
+     * contribute their first solid colour only.
+     */
+    private fun drawingPaintColors(drawing: Element): Pair<String?, String?> {
+        val spPr = drawing.descendantsNs(Ns.A, "spPr").firstOrNull()
+        val dmlFill = solidFillColor(spPr?.firstNs(Ns.A, "solidFill"))
+        val dmlStroke = solidFillColor(spPr?.firstNs(Ns.A, "ln")?.firstNs(Ns.A, "solidFill"))
+
+        val vmlShape = drawing.descendantsNs(Ns.VML, "shape").firstOrNull()
+        val vmlStyle = vmlShape?.getAttribute("style")
+        val (vmlFill, vmlStroke) = vmlPaintColors(vmlStyle)
+
+        return (dmlFill ?: vmlFill) to (dmlStroke ?: vmlStroke)
+    }
+
+    /** Resolves an `a:solidFill` to a concrete colour (`srgbClr` or themed `schemeClr`). */
+    private fun solidFillColor(solidFill: Element?): String? {
+        solidFill ?: return null
+        solidFill.firstNs(Ns.A, "srgbClr")?.getAttribute("val")
+            ?.takeIf { it.isNotEmpty() }?.let { return it }
+        val scheme = solidFill.firstNs(Ns.A, "schemeClr")?.getAttribute("val")
+            ?.takeIf { it.isNotEmpty() } ?: return null
+        return context.theme.color(scheme)
+    }
+
+    /** Parses `fillcolor:`/`strokecolor:` entries out of a VML `style` attribute. */
+    private fun vmlPaintColors(styleText: String?): Pair<String?, String?> {
+        if (styleText.isNullOrBlank()) return null to null
+        var fill: String? = null
+        var stroke: String? = null
+        styleText.split(';').map { it.trim() }.forEach { entry ->
+            val (key, value) = entry.split(':', limit = 2).let { it.getOrNull(0) to it.getOrNull(1) }
+            when {
+                key.equals("fillcolor", true) -> fill = value?.trim()?.takeIf { it.isNotEmpty() }
+                key.equals("strokecolor", true) -> stroke = value?.trim()?.takeIf { it.isNotEmpty() }
+            }
+        }
+        return fill to stroke
     }
 
     private fun Element.unprefixedLong(local: String): Long? =
@@ -194,10 +240,13 @@ class DocxDrawingMapper(
     private fun vmlFrameStyle(shape: Element?, textbox: Element?): FrameStyle {
         val styleText = shape?.getAttribute("style")?.takeIf { it.isNotBlank() }
             ?: textbox?.getAttribute("style")?.takeIf { it.isNotBlank() }
+        val (vmlFill, vmlStroke) = vmlPaintColors(styleText)
         return FrameStyle(
             anchor = FrameAnchor.ANCHORED,
             widthPoints = vmlLength(styleText, "width"),
-            heightPoints = vmlLength(styleText, "height")
+            heightPoints = vmlLength(styleText, "height"),
+            fillColor = vmlFill,
+            strokeColor = vmlStroke
         )
     }
 

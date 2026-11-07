@@ -15,7 +15,7 @@ data class PageModel(
     val documentFingerprint: Long = 0L
 )
 
-enum class PageState { 
+enum class PageState {
     CLEAN,     // Ready to render
     DIRTY,     // Needs re-calculation
     MEASURING  // Currently being processed by the engine

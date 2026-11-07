@@ -70,14 +70,20 @@ class OdfStyleResolver private constructor(
     fun tableStyle(name: String?): TableStyle {
         if (name == null) return TableStyle()
         return tableCache.getOrPut(name) {
-            tablePool[name]?.let { OdfTableProperties.parseTable(it) } ?: TableStyle()
+            if (!tablePool.containsKey(name)) return@getOrPut TableStyle()
+            var result = TableStyle()
+            chain(name, tablePool).forEach { result = result.mergedWith(OdfTableProperties.parseTable(it)) }
+            result
         }
     }
 
     fun cellStyle(name: String?): CellStyle {
         if (name == null) return CellStyle()
         return cellCache.getOrPut(name) {
-            cellPool[name]?.let { OdfTableProperties.parseCell(it) } ?: CellStyle()
+            if (!cellPool.containsKey(name)) return@getOrPut CellStyle()
+            var result = CellStyle()
+            chain(name, cellPool).forEach { result = result.mergedWith(OdfTableProperties.parseCell(it)) }
+            result
         }
     }
 

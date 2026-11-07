@@ -25,7 +25,15 @@ sealed class DocumentElement {
         /** Parsed column grid widths in points (from `w:tblGrid`). Empty = use heuristic. */
         val gridColumnWidthsPt: List<Float> = emptyList(),
         /** Explicit row heights in points (from `w:trHeight`); 0 = unspecified. */
-        val rowHeightsPt: List<Float> = emptyList()
+        val rowHeightsPt: List<Float> = emptyList(),
+        /**
+         * Fully resolved document-authored table presentation produced by
+         * [com.tosin.docprocessor.domain.rendering.table.TablePresentationResolver].
+         * Null for tables built without the rich document model (legacy paths);
+         * renderers must then fall back to transparent/no-style output rather
+         * than application theme styling.
+         */
+        val presentation: com.tosin.docprocessor.domain.rendering.table.TablePresentation? = null
     ) : DocumentElement()
 
 

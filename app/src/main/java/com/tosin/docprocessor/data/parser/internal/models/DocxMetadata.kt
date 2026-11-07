@@ -44,6 +44,8 @@ data class SectionProperties(
     val orientation: String? = null,
     val columnCount: Int? = null,
     val pageNumberStart: Int? = null,
+    /** Document-authored page background colour (`w:background`/ODF `fo:background-color`). */
+    val pageBackground: String? = null,
     val headerReferences: List<HeaderFooterReference> = emptyList(),
     val footerReferences: List<HeaderFooterReference> = emptyList()
 )
@@ -57,6 +59,8 @@ data class HeaderFooterContent(
     val kind: HeaderFooterKind,
     val variant: String,
     val text: String,
+    /** Styled runs of the header/footer story; empty for legacy/plain content. */
+    val spans: List<TextSpan> = emptyList(),
     val paragraphCount: Int,
     val tableCount: Int,
     val elementSummaries: List<String> = emptyList(),
@@ -133,7 +137,11 @@ data class DrawingInfo(
     val rotation: Int? = null,
     val effects: List<String> = emptyList(),
     val isGrouped: Boolean = false,
-    val hasText: Boolean = false
+    val hasText: Boolean = false,
+    /** Authored shape fill colour (hex/`rgb()`/named) when the drawing declares one. */
+    val fillColor: String? = null,
+    /** Authored shape outline colour when the drawing declares one. */
+    val strokeColor: String? = null
 )
 
 data class EmbeddedObjectInfo(

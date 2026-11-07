@@ -10,5 +10,9 @@ data class FrameStyle(
     val positionYPoints: Double? = null,
     val rotationDegrees: Double? = null,
     val wrapStyle: String? = null,
-    val zOrder: Int? = null
+    val zOrder: Int? = null,
+    /** Authored shape fill colour (hex/`rgb()`/named) when declared. */
+    val fillColor: String? = null,
+    /** Authored shape outline colour when declared. */
+    val strokeColor: String? = null
 )

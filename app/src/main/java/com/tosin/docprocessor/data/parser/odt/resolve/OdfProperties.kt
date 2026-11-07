@@ -159,11 +159,88 @@ object OdfParagraphProperties {
         else -> null
     }
 
+    private val NO_PAINT_BORDER_STYLES = setOf("none", "hidden")
+
+    /** ODF/CSS border line styles passed through to renderers verbatim. */
+    private val BORDER_STYLE_TOKENS = setOf(
+        "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset"
+    )
+
+    /** CSS border-width keywords mapped to points (thin=1px, medium=3px, thick=5px). */
+    private val BORDER_WIDTH_KEYWORDS = mapOf("thin" to 0.75, "medium" to 2.25, "thick" to 3.75)
+
+    private val RGB_FUNCTION_REGEX = Regex("""rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)""")
+    private val RGB_SPACES_REGEX = Regex("""(rgba?\()[^)]*\)""")
+
+    /** Common CSS/X11 colour names mapped to `#RRGGBB` for downstream parsing. */
+    private val NAMED_COLORS = mapOf(
+        "black" to "#000000", "white" to "#FFFFFF", "red" to "#FF0000",
+        "green" to "#008000", "blue" to "#0000FF", "yellow" to "#FFFF00",
+        "cyan" to "#00FFFF", "aqua" to "#00FFFF", "magenta" to "#FF00FF",
+        "fuchsia" to "#FF00FF", "gray" to "#808080", "grey" to "#808080",
+        "silver" to "#C0C0C0", "maroon" to "#800000", "olive" to "#808000",
+        "lime" to "#00FF00", "teal" to "#008080", "navy" to "#000080",
+        "purple" to "#800080", "orange" to "#FFA500", "brown" to "#A52A2A",
+        "pink" to "#FFC0CB", "gold" to "#FFD700", "beige" to "#F5F5DC",
+        "ivory" to "#FFFFF0", "khaki" to "#F0E68C", "lavender" to "#E6E6FA",
+        "coral" to "#FF7F50", "salmon" to "#FA8072", "tomato" to "#FF6347",
+        "violet" to "#EE82EE", "indigo" to "#4B0082", "turquoise" to "#40E0D0"
+    )
+
+    /**
+     * Parses an ODF border shorthand (`fo:border`, `fo:border-top`, …).
+     * Tokens may appear in any order: width (`0.5pt`, `thin`/`medium`/`thick`),
+     * style (`solid`, `dashed`, …) and colour (`#hex`, `rgb()`, named colour).
+     * `none`/`hidden` anywhere in the value is an explicit no-paint marker.
+     */
     fun parseBorder(value: String): Border {
-        val parts = value.trim().split(Regex("\\s+"))
-        val color = parts.lastOrNull()?.takeIf { it.startsWith("#") }
-        val width = parts.firstOrNull()?.let { Units.parseOdfLength(it) }
-        return Border(style = "solid", widthPoints = width, color = color)
+        // `rgb()` functional notation may contain spaces; strip them first so
+        // whitespace tokenisation cannot split the colour into pieces.
+        val normalized = RGB_SPACES_REGEX.replace(value.trim()) { match ->
+            match.value.filterNot { it.isWhitespace() }
+        }
+        val parts = normalized.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return Border(style = "solid")
+
+        var style: String? = null
+        var width: Double? = null
+        var color: String? = null
+        for (token in parts) {
+            val lower = token.lowercase()
+            when {
+                lower in NO_PAINT_BORDER_STYLES ->
+                    return Border(style = "none", widthPoints = 0.0)
+                lower in BORDER_STYLE_TOKENS -> style = lower
+                lower in BORDER_WIDTH_KEYWORDS -> width = BORDER_WIDTH_KEYWORDS[lower]
+                else -> {
+                    val parsedWidth = Units.parseOdfLength(token)
+                    when {
+                        parsedWidth != null -> width = parsedWidth
+                        else -> borderColor(token)?.let { color = it }
+                    }
+                }
+            }
+        }
+        return Border(style = style ?: "solid", widthPoints = width, color = color)
+    }
+
+    /** Normalises a colour token to `#RRGGBB`; null when the token is not a colour. */
+    private fun borderColor(token: String): String? {
+        if (token.startsWith("#")) {
+            val hex = token.removePrefix("#")
+            return if (hex.length in setOf(3, 6, 8) && hex.all { it.digitToIntOrNull(16) != null }) {
+                "#$hex"
+            } else {
+                null
+            }
+        }
+        RGB_FUNCTION_REGEX.matchEntire(token)?.let { match ->
+            val r = match.groupValues[1].toIntOrNull()?.coerceIn(0, 255) ?: return null
+            val g = match.groupValues[2].toIntOrNull()?.coerceIn(0, 255) ?: return null
+            val b = match.groupValues[3].toIntOrNull()?.coerceIn(0, 255) ?: return null
+            return "#%02X%02X%02X".format(r, g, b)
+        }
+        return NAMED_COLORS[token.lowercase()]
     }
 }
 
@@ -180,19 +257,13 @@ object OdfTableProperties {
                 else -> null
             },
             shading = props.attrNs(Ns.FO, "background-color")?.let { Shading(fill = it) },
-            borders = props.attrNs(Ns.FO, "border")?.let {
-                val border = OdfParagraphProperties.parseBorder(it)
-                CellBorders(top = border, right = border, bottom = border, left = border)
-            } ?: CellBorders()
+            borders = parseBorders(props),
+            cellMargins = parsePadding(props)
         )
     }
 
     fun parseCell(styleElement: Element): CellStyle {
         val props = styleElement.firstNs(Ns.STYLE, "table-cell-properties")
-        val borders = props?.attrNs(Ns.FO, "border")?.let {
-            val border = OdfParagraphProperties.parseBorder(it)
-            CellBorders(top = border, right = border, bottom = border, left = border)
-        } ?: CellBorders()
         return CellStyle(
             widthPoints = Units.parseOdfLength(props?.attrNs(Ns.STYLE, "width")),
             verticalAlign = when (props?.attrNs(Ns.STYLE, "vertical-align")?.lowercase()) {
@@ -202,10 +273,27 @@ object OdfTableProperties {
                 else -> null
             },
             shading = props?.attrNs(Ns.FO, "background-color")?.let { Shading(fill = it) },
-            borders = borders,
+            borders = parseBorders(props),
             margins = parsePadding(props),
             textDirection = props?.attrNs(Ns.FO, "text-direction")
                 ?: props?.attrNs(Ns.STYLE, "writing-mode")
+        )
+    }
+
+    /**
+     * Side-specific ODF borders: `fo:border-{top,right,bottom,left}` win per
+     * side, falling back to the uniform `fo:border` for unspecified sides.
+     */
+    private fun parseBorders(props: Element?): CellBorders {
+        if (props == null) return CellBorders()
+        val uniform = props.attrNs(Ns.FO, "border")?.let { OdfParagraphProperties.parseBorder(it) }
+        fun side(name: String): Border? =
+            props.attrNs(Ns.FO, name)?.let { OdfParagraphProperties.parseBorder(it) } ?: uniform
+        return CellBorders(
+            top = side("border-top"),
+            right = side("border-right"),
+            bottom = side("border-bottom"),
+            left = side("border-left")
         )
     }
 

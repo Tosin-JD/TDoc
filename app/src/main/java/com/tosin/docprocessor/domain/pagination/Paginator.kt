@@ -18,12 +18,15 @@ interface Paginator {
      * @param dimensions The physical page dimensions and margins
      * @param startIndex Optional: Start re-paginating from this element index
      *                   Used for incremental updates. Default = 0 (full paginate)
+     * @param isDarkMode Resolve run colours against the dark document palette so
+     *                   baked text layouts stay readable on dark pages.
      * @return A list of PageModels, one per page
      */
     fun paginate(
         data: DocumentData,
         dimensions: PageDimensions,
-        startIndex: Int = 0
+        startIndex: Int = 0,
+        isDarkMode: Boolean = false
     ): List<PageModel>
 
     /**

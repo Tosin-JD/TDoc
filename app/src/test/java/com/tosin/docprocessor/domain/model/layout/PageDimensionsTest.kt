@@ -6,13 +6,13 @@ import org.junit.Test
 class PageDimensionsTest {
     @Test
     fun `bodyHeight excludes header and footer zones`() {
-        val dims = PageDimensions(headerHeight = 36f, footerHeight = 24f)
-        assertEquals(dims.printableHeight - 36f - 24f, dims.bodyHeight, 0.01f)
+        val dims = PageDimensions(marginTop = 36f, headerEdgePt = 36f, headerHeight = 36f, marginBottom = 36f, footerEdgePt = 36f, footerHeight = 24f)
+        assertEquals(dims.height - 72f - 60f, dims.bodyHeight, 0.01f)
     }
 
     @Test
     fun `bodyTop is marginTop plus headerHeight`() {
-        val dims = PageDimensions(marginTop = 72f, headerHeight = 36f)
+        val dims = PageDimensions(marginTop = 72f, headerEdgePt = 36f, headerHeight = 72f)
         assertEquals(108f, dims.bodyTop, 0.01f)
     }
 

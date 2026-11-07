@@ -36,7 +36,8 @@ object SpannableTextBuilder {
         fontResolver: FontFamilyResolver,
         tokens: DocumentColorTokens,
         isDarkMode: Boolean,
-        sizeToPx: (Float) -> Int
+        sizeToPx: (Float) -> Int,
+        backgroundArgb: Int? = null
     ): CharSequence {
         val builder = SpannableStringBuilder()
         spans.forEach { span ->
@@ -56,7 +57,20 @@ object SpannableTextBuilder {
                 span.isBold,
                 span.isItalic
             )
-            val color = DocumentTextColorResolver.resolveTextColor(span.color, tokens, isDarkMode)
+            // Text sits on its own highlight when present, else on the
+            // effective local background (cell fill → table fill → page).
+            val highlight = DocumentTextColorResolver.resolveHighlightColor(
+                span.highlightColor, tokens, isDarkMode,
+                backgroundArgb ?: tokens.pageBackground
+            )
+            val textBackground = highlight ?: (backgroundArgb ?: tokens.pageBackground)
+            val color = when {
+                // Links without an authored colour take the themed link colour.
+                span.hyperlink != null && span.color == null -> tokens.linkColor
+                else -> DocumentTextColorResolver.resolveTextColor(
+                    span.color, tokens, isDarkMode, textBackground
+                )
+            }
             val flag = SpannableStringBuilder.SPAN_EXCLUSIVE_EXCLUSIVE
 
             builder.setSpan(TypefaceSpanCompat(typeface), start, end, flag)
@@ -70,12 +84,14 @@ object SpannableTextBuilder {
                     builder.setSpan(LetterSpacingSpan(em), start, end, flag)
                 }
 
-            if (span.isUnderline) builder.setSpan(UnderlineSpan(), start, end, flag)
+            if (span.isUnderline || span.hyperlink != null) {
+                builder.setSpan(UnderlineSpan(), start, end, flag)
+            }
             if (span.isStrikethrough) builder.setSpan(StrikethroughSpan(), start, end, flag)
             if (span.isSuperscript) builder.setSpan(SuperscriptSpan(), start, end, flag)
             if (span.isSubscript) builder.setSpan(SubscriptSpan(), start, end, flag)
 
-            DocumentTextColorResolver.parseColorString(span.highlightColor)?.let {
+            highlight?.let {
                 builder.setSpan(BackgroundColorSpan(it), start, end, flag)
             }
         }
