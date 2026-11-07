@@ -97,6 +97,7 @@ import java.util.Date
 @Composable
 fun HomeScreen(
     onOpenDocument: (Uri) -> Unit,
+    onNavigate: (String) -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -149,6 +150,23 @@ fun HomeScreen(
         }
     )
 
+    val folderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+        onResult = { uri ->
+            uri?.let { picked ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        picked,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                }
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Folder access granted. Open a document from the selected folder.")
+                }
+            }
+        }
+    )
+
 
 
     ModalNavigationDrawer(
@@ -165,18 +183,32 @@ fun HomeScreen(
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp)
                 )
-                DrawerEntry("Recent", Icons.Default.AccessTime)
-                DrawerEntry("Starred", Icons.Default.Star)
-                DrawerEntry("Documents", Icons.Default.Description)
-                DrawerEntry("Download", Icons.Default.Download)
-                DrawerEntry("Internal Storage", Icons.Default.Storage)
-                DrawerEntry("SD Card", Icons.Default.Storage)
-                DrawerEntry("OTG", Icons.Default.Usb)
-                DrawerEntry("Others", Icons.Default.Folder)
+                BrowseLocation.entries.forEach { location ->
+                    DrawerEntry(location.title, when (location) {
+                        BrowseLocation.RECENT -> Icons.Default.AccessTime
+                        BrowseLocation.STARRED -> Icons.Default.Star
+                        BrowseLocation.DOCUMENTS -> Icons.Default.Description
+                        BrowseLocation.DOWNLOADS -> Icons.Default.Download
+                        BrowseLocation.INTERNAL_STORAGE -> Icons.Default.Storage
+                        BrowseLocation.SD_CARD -> Icons.Default.Storage
+                        BrowseLocation.OTG -> Icons.Default.Usb
+                        BrowseLocation.OTHERS -> Icons.Default.Folder
+                    }, selected = uiState.selectedLocation == location) {
+                        coroutineScope.launch { drawerState.close() }
+                        viewModel.selectLocation(location)
+                        when (location) {
+                            BrowseLocation.DOCUMENTS, BrowseLocation.DOWNLOADS, BrowseLocation.OTHERS -> openDocLauncher.launch(
+                                arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.oasis.opendocument.text", "text/plain")
+                            )
+                            BrowseLocation.INTERNAL_STORAGE, BrowseLocation.SD_CARD, BrowseLocation.OTG -> folderLauncher.launch(null)
+                            else -> Unit
+                        }
+                    }
+                }
                 Divider(modifier = Modifier.padding(vertical = 12.dp))
-                DrawerEntry("Settings", Icons.Default.Settings)
-                DrawerEntry("About", Icons.Default.Info)
-                DrawerEntry("Help & Feedback", Icons.AutoMirrored.Filled.Help)
+                DrawerEntry("Settings", Icons.Default.Settings) { onNavigate("settings") }
+                DrawerEntry("About", Icons.Default.Info) { onNavigate("about") }
+                DrawerEntry("Help & Feedback", Icons.AutoMirrored.Filled.Help) { onNavigate("help") }
             }
         }
     ) {
@@ -288,7 +320,16 @@ fun HomeScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No recent DOCX or ODT files yet.",
+                            text = when (uiState.selectedLocation) {
+                                BrowseLocation.RECENT -> "No recent DOCX or ODT files yet."
+                                BrowseLocation.STARRED -> "No starred supported documents yet."
+                                BrowseLocation.DOCUMENTS -> "Browse supported documents using the system document picker."
+                                BrowseLocation.DOWNLOADS -> "Choose a supported file from Downloads in the system document picker."
+                                BrowseLocation.INTERNAL_STORAGE -> "Select an internal storage folder to grant access."
+                                BrowseLocation.SD_CARD -> "Select an SD card folder. Android requires folder access to be granted."
+                                BrowseLocation.OTG -> "Connect a USB drive, then select its folder to grant access."
+                                BrowseLocation.OTHERS -> "Choose a supported document from another location."
+                            },
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -470,10 +511,14 @@ private fun SortOptionItem(
 }
 
 @Composable
-private fun DrawerEntry(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+private fun DrawerEntry(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean = false, onClick: () -> Unit = {}) {
     ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
         headlineContent = { Text(label) },
-        leadingContent = { Icon(icon, contentDescription = null) }
+        leadingContent = { Icon(icon, contentDescription = null) },
+        colors = androidx.compose.material3.ListItemDefaults.colors(
+            containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
+        )
     )
 }
 

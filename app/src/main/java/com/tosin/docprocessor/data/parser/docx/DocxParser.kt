@@ -34,9 +34,6 @@ import kotlinx.coroutines.withContext
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import java.io.File
-import java.io.OutputStream
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 class DocxParser(
     private val cacheDir: File,
@@ -108,23 +105,6 @@ class DocxParser(
                 val context = ParseErrorContext(currentElement = currentElement)
                 TDocLogger.error("Failed to parse DOCX", e, mapOf("lastElement" to currentElement))
                 Result.failure(ParseException("Failed to parse DOCX: ${e.message}", context, e))
-            }
-        }
-
-    override suspend fun save(outputStream: OutputStream, content: List<DocumentElement>): Result<Unit> =
-        withContext(Dispatchers.IO) {
-            try {
-                ZipOutputStream(outputStream).use { zip ->
-                    writeZipEntry(zip, "[Content_Types].xml", buildContentTypesXml())
-                    writeZipEntry(zip, "_rels/.rels", buildRootRelationshipsXml())
-                    writeZipEntry(zip, "word/document.xml", buildDocumentXml(content))
-                    writeZipEntry(zip, "word/styles.xml", buildStylesXml())
-                    writeZipEntry(zip, "word/_rels/document.xml.rels", buildDocumentRelationshipsXml())
-                }
-                Result.success(Unit)
-            } catch (e: Exception) {
-                TDocLogger.error("Failed to save DOCX", e)
-                Result.failure(e)
             }
         }
 
@@ -617,144 +597,6 @@ class DocxParser(
             "distribute" -> ParagraphAlignment.DISTRIBUTED
             else -> ParagraphAlignment.START
         }
-
-    private fun writeZipEntry(zip: ZipOutputStream, path: String, content: String) {
-        zip.putNextEntry(ZipEntry(path))
-        zip.write(content.toByteArray(Charsets.UTF_8))
-        zip.closeEntry()
-    }
-
-    private fun buildContentTypesXml(): String = """
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-          <Default Extension="xml" ContentType="application/xml"/>
-          <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-          <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-        </Types>
-    """.trimIndent()
-
-    private fun buildRootRelationshipsXml(): String = """
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-        </Relationships>
-    """.trimIndent()
-
-    private fun buildDocumentRelationshipsXml(): String = """
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-        </Relationships>
-    """.trimIndent()
-
-    private fun buildStylesXml(): String = """
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-          <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
-            <w:name w:val="Normal"/>
-          </w:style>
-          <w:style w:type="paragraph" w:styleId="Heading1">
-            <w:name w:val="heading 1"/>
-            <w:pPr><w:outlineLvl w:val="0"/></w:pPr>
-          </w:style>
-          <w:style w:type="paragraph" w:styleId="Heading2">
-            <w:name w:val="heading 2"/>
-            <w:pPr><w:outlineLvl w:val="1"/></w:pPr>
-          </w:style>
-          <w:style w:type="paragraph" w:styleId="Heading3">
-            <w:name w:val="heading 3"/>
-            <w:pPr><w:outlineLvl w:val="2"/></w:pPr>
-          </w:style>
-        </w:styles>
-    """.trimIndent()
-
-    private fun buildDocumentXml(content: List<DocumentElement>): String {
-        val body = buildString {
-            content.forEach { element ->
-                append(renderElement(element))
-            }
-            append("<w:sectPr/>")
-        }
-
-        return """
-            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-            <w:document
-                xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-              <w:body>$body</w:body>
-            </w:document>
-        """.trimIndent()
-    }
-
-    private fun renderElement(element: DocumentElement): String =
-        when (element) {
-            is DocumentElement.Paragraph -> renderParagraph(element)
-            is DocumentElement.SectionHeader -> renderHeader(element)
-            is DocumentElement.Table -> renderTable(element)
-            is DocumentElement.Image -> renderPlainParagraph(element.caption ?: element.altText ?: "[Image]")
-            is DocumentElement.PageBreak -> "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>"
-            is DocumentElement.Section -> renderPlainParagraph(element.properties.toString())
-            is DocumentElement.HeaderFooter -> renderPlainParagraph(element.content.text)
-            is DocumentElement.Note -> renderPlainParagraph(element.info.text)
-            is DocumentElement.Comment -> renderPlainParagraph(element.info.text)
-            is DocumentElement.Bookmark -> renderPlainParagraph(element.info.name)
-            is DocumentElement.Field -> renderPlainParagraph(element.info.instruction)
-            is DocumentElement.Metadata -> renderPlainParagraph("${element.info.title ?: element.info.kind}: ${element.info.summary}")
-            is DocumentElement.Drawing -> renderPlainParagraph(element.info.kind)
-            is DocumentElement.EmbeddedObject -> renderPlainParagraph(element.info.description ?: element.info.kind)
-        }
-
-    private fun renderParagraph(paragraph: DocumentElement.Paragraph): String {
-        val paragraphProperties = buildString {
-            paragraph.style.headingLevel?.let { level ->
-                append("<w:pStyle w:val=\"Heading${level.coerceIn(1, 3)}\"/>")
-            }
-        }
-        val runs = paragraph.spans.joinToString("") { span ->
-            val runProperties = buildString {
-                if (span.isBold) append("<w:b/>")
-                if (span.isItalic) append("<w:i/>")
-                if (span.isUnderline) append("<w:u w:val=\"single\"/>")
-                if (span.isStrikethrough) append("<w:strike/>")
-                span.color.takeIf { it.isNotBlank() }?.let { append("<w:color w:val=\"${escapeXml(it.removePrefix("#"))}\"/>") }
-                span.fontSize?.let { append("<w:sz w:val=\"${it * 2}\"/>") }
-            }
-            val preserved = if (span.text.startsWith(" ") || span.text.endsWith(" ")) " xml:space=\"preserve\"" else ""
-            "<w:r>${if (runProperties.isNotBlank()) "<w:rPr>$runProperties</w:rPr>" else ""}<w:t$preserved>${escapeXml(span.text)}</w:t></w:r>"
-        }
-        return "<w:p>${if (paragraphProperties.isNotBlank()) "<w:pPr>$paragraphProperties</w:pPr>" else ""}$runs</w:p>"
-    }
-
-    private fun renderHeader(header: DocumentElement.SectionHeader): String =
-        "<w:p><w:pPr><w:pStyle w:val=\"Heading${header.level.coerceIn(1, 3)}\"/></w:pPr><w:r><w:t>${escapeXml(header.text)}</w:t></w:r></w:p>"
-
-    private fun renderTable(table: DocumentElement.Table): String {
-        val rows = table.rows.joinToString("") { row ->
-            "<w:tr>${row.joinToString("") { cell ->
-                "<w:tc><w:p><w:r><w:t>${escapeXml(cell)}</w:t></w:r></w:p></w:tc>"
-            }}</w:tr>"
-        }
-        return "<w:tbl>$rows</w:tbl>"
-    }
-
-    private fun renderPlainParagraph(text: String): String =
-        "<w:p><w:r><w:t>${escapeXml(text)}</w:t></w:r></w:p>"
-
-    private fun escapeXml(value: String): String = buildString {
-        value.forEach { char ->
-            append(
-                when (char) {
-                    '&' -> "&amp;"
-                    '<' -> "&lt;"
-                    '>' -> "&gt;"
-                    '"' -> "&quot;"
-                    '\'' -> "&apos;"
-                    else -> char
-                }
-            )
-        }
-    }
 
     private data class RunContent(
         val spans: List<TextSpan>,

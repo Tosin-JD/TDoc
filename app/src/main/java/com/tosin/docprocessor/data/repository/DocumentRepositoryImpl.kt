@@ -9,17 +9,23 @@ import com.tosin.docprocessor.domain.model.MimeTypes
 import com.tosin.docprocessor.domain.document.ParseResult
 import com.tosin.docprocessor.data.parser.ParserFactory
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.data.writer.WriterFactory
+import com.tosin.docprocessor.data.writer.DocumentOutputFormatResolver
+import com.tosin.docprocessor.data.writer.common.LegacyDocumentExportAdapter
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.tosin.docprocessor.domain.document.model.ParsedDocument
 import javax.inject.Inject
 
 class DocumentRepositoryImpl @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    private val parserFactory: ParserFactory
+    private val parserFactory: ParserFactory,
+    private val writerFactory: WriterFactory,
+    private val exportAdapter: LegacyDocumentExportAdapter
 ) : DocumentRepository {
 
     override suspend fun readDocumentFromUri(uri: Uri): ParseResult {
@@ -32,18 +38,11 @@ class DocumentRepositoryImpl @Inject constructor(
         } ?: ParseResult(content = plainTextDocument("Failed to open file"))
     }
 
-    override suspend fun saveDocumentToUri(uri: Uri, content: List<DocumentElement>) {
+    override suspend fun saveDocumentToUri(uri: Uri, document: ParsedDocument) {
         val fileName = getFileName(uri)
-        val mimeType = context.contentResolver.getType(uri)
-            ?: MimeTypes.fromExtension(fileName.substringAfterLast('.', ""))
-            ?: ""
+        val mimeType = DocumentOutputFormatResolver.resolve(fileName, context.contentResolver.getType(uri))
         context.contentResolver.openOutputStream(uri, "w")?.use { outputStream ->
-            val parser = parserFactory.createParser(mimeType)
-            if (parser != null) {
-                parser.save(outputStream, content).getOrThrow()
-            } else {
-                outputStream.bufferedWriter().use { it.write(content.toPlainText()) }
-            }
+            writeDocument(document, mimeType, outputStream)
         } ?: throw IllegalStateException("Could not open output stream for URI: $uri")
     }
 
@@ -76,13 +75,10 @@ class DocumentRepositoryImpl @Inject constructor(
     override fun saveDocument(document: DocumentData): Flow<Unit> = flow {
         val file = File(document.id.ifEmpty { document.filename })
         file.outputStream().use { outputStream ->
-            val mimeType = MimeTypes.fromExtension(document.format.lowercase()).orEmpty()
-            val parser = parserFactory.createParser(mimeType)
-            if (parser != null) {
-                parser.save(outputStream, document.content).getOrThrow()
-            } else {
-                outputStream.bufferedWriter().use { it.write(document.content.toPlainText()) }
-            }
+            val name = file.name.ifBlank { document.filename }
+            val mimeType = DocumentOutputFormatResolver.resolve(name, MimeTypes.fromExtension(document.format))
+            val parsed = exportAdapter.adapt(document.content)
+            writeDocument(parsed, mimeType, outputStream, document.content)
         }
         emit(Unit)
     }
@@ -104,16 +100,9 @@ class DocumentRepositoryImpl @Inject constructor(
 
     override suspend fun createNewDocument(uri: Uri) {
         val fileName = getFileName(uri)
-        val mimeType = context.contentResolver.getType(uri)
-            ?: MimeTypes.fromExtension(fileName.substringAfterLast('.', ""))
-            ?: ""
+        val mimeType = DocumentOutputFormatResolver.resolve(fileName, context.contentResolver.getType(uri))
         context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-            val parser = parserFactory.createParser(mimeType)
-            if (parser != null) {
-                parser.save(outputStream, emptyList()).getOrThrow()
-            } else {
-                outputStream.bufferedWriter().use { it.write("") }
-            }
+            writeDocument(ParsedDocument(), mimeType, outputStream, emptyList())
         } ?: throw IllegalStateException("Could not open output stream for URI: $uri")
     }
 
@@ -121,7 +110,7 @@ class DocumentRepositoryImpl @Inject constructor(
         inputStream: java.io.InputStream,
         mimeType: String
     ): List<DocumentElement> {
-        val parser = parserFactory.createParser(mimeType)
+        val parser = parserFactory.createLegacyParser(mimeType)
         return parser?.parse(inputStream)?.getOrThrow()
             ?: plainTextDocument(inputStream.bufferedReader().use { it.readText() })
     }
@@ -162,6 +151,43 @@ class DocumentRepositoryImpl @Inject constructor(
 
     private fun plainTextDocument(text: String): List<DocumentElement> =
         listOf(DocumentElement.Paragraph(spans = listOf(TextSpan(text = text, color = "000000"))))
+
+    private suspend fun writeDocument(
+        document: ParsedDocument,
+        mimeType: String,
+        outputStream: java.io.OutputStream,
+        plainTextContent: List<DocumentElement>? = null
+    ) {
+        val writer = writerFactory.createWriter(mimeType)
+        if (writer != null) {
+            writer.write(document, outputStream)
+        } else if (mimeType.startsWith("text/")) {
+            outputStream.writer(Charsets.UTF_8).apply {
+                write(plainTextContent?.toPlainText() ?: document.blocks.joinToString("\n") { block ->
+                    when (block) {
+                        is com.tosin.docprocessor.domain.document.model.BlockNode.Paragraph ->
+                            block.inlines.joinToString("") { inlineText(it) }
+                        is com.tosin.docprocessor.domain.document.model.BlockNode.Heading ->
+                            block.inlines.joinToString("") { inlineText(it) }
+                        else -> ""
+                    }
+                })
+                flush()
+            }
+        } else {
+            throw IllegalArgumentException("Unsupported output format: $mimeType")
+        }
+    }
+
+    private fun inlineText(inline: com.tosin.docprocessor.domain.document.model.InlineNode): String =
+        when (inline) {
+            is com.tosin.docprocessor.domain.document.model.InlineNode.Text -> inline.text
+            is com.tosin.docprocessor.domain.document.model.InlineNode.Span -> inline.children.joinToString("") { inlineText(it) }
+            is com.tosin.docprocessor.domain.document.model.InlineNode.Hyperlink -> inline.children.joinToString("") { inlineText(it) }
+            is com.tosin.docprocessor.domain.document.model.InlineNode.Break -> "\n"
+            is com.tosin.docprocessor.domain.document.model.InlineNode.Tab -> "\t"
+            else -> ""
+        }
 
     private fun List<DocumentElement>.toPlainText(): String =
         joinToString("\n") { element ->

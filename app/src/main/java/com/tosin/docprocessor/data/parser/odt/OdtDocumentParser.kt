@@ -27,12 +27,11 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
-import java.io.OutputStream
 import java.util.zip.ZipInputStream
 
 /**
  * Rich OpenDocument Text parser. Produces a [ParsedDocument] plus the temporary
- * legacy projection. Read-only; export is delegated to the legacy parser.
+ * legacy projection. Parsing only.
  */
 class OdtDocumentParser(
     private val entries: Map<String, ByteArray>,
@@ -41,8 +40,6 @@ class OdtDocumentParser(
     private val resources: ResourceCollector = ResourceCollector()
 ) : DocumentParser {
 
-    private val legacySaver: OdtParser? = cacheDir?.let { OdtParser(it) }
-
     override suspend fun parse(inputStream: InputStream): Result<List<DocumentElement>> =
         parseWithReport(inputStream).map { it.content }
 
@@ -50,13 +47,6 @@ class OdtDocumentParser(
         withContext(Dispatchers.IO) {
             runCatching { parseEntries(entries) }
         }
-
-    override suspend fun save(outputStream: OutputStream, content: List<DocumentElement>): Result<Unit> {
-        val saver = legacySaver ?: return Result.failure(
-            IllegalStateException("Export disabled: rich parser is read-only. Use an export-basic-copy action.")
-        )
-        return saver.save(outputStream, content)
-    }
 
     fun parseEntries(entries: Map<String, ByteArray>): ParseResult {
         val opc = OdfPackage.parse(entries)

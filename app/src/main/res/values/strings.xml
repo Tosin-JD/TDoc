@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">T Doc</string>
+    <string name="about_description">A document editor for creating and working with supported office documents.</string>
+    <string name="about_formats">Supported formats: DOCX and ODT. Plain text can be opened for editing.</string>
+    <string name="feedback_email">support@tdoc.app</string>
+    <string name="feedback_subject">T Doc feedback</string>
+    <string name="feedback_fallback">No email app is available. Contact us at %1$s.</string>
 </resources>

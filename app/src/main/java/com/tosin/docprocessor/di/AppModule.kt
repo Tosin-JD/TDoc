@@ -18,6 +18,8 @@ import com.tosin.docprocessor.data.repository.ThemeRepository
 import com.tosin.docprocessor.data.repository.ThemeRepositoryImpl
 import com.tosin.docprocessor.domain.typography.FontFamilyResolver
 import com.tosin.docprocessor.domain.typography.TextFlowResolver
+import com.tosin.docprocessor.data.writer.WriterFactory
+import com.tosin.docprocessor.data.writer.common.LegacyDocumentExportAdapter
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -27,8 +29,10 @@ object AppModule {
     @Singleton
     fun provideDocumentRepository(
         @ApplicationContext context: Context,
-        parserFactory: ParserFactory
-    ): DocumentRepository = DocumentRepositoryImpl(context, parserFactory)
+        parserFactory: ParserFactory,
+        writerFactory: WriterFactory,
+        exportAdapter: LegacyDocumentExportAdapter
+    ): DocumentRepository = DocumentRepositoryImpl(context, parserFactory, writerFactory, exportAdapter)
 
     @Provides
     @Singleton

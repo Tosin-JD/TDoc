@@ -13,8 +13,8 @@ class ParserFactory @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
 
-    /** Legacy parser used for writing new/blank documents. */
-    fun createParser(mimeType: String): DocumentParser? {
+    /** Legacy projection parser retained for read paths that need DocumentElement values. */
+    fun createLegacyParser(mimeType: String): DocumentParser? {
         return when (mimeType) {
             MimeTypes.DOCX -> DocxParser(context.cacheDir)
             MimeTypes.ODT -> OdtParser(context.cacheDir)

@@ -14,10 +14,12 @@ import com.tosin.docprocessor.domain.model.ViewMode
 import com.tosin.docprocessor.domain.model.layout.PageLayoutState
 import com.tosin.docprocessor.domain.document.DiagnosticsSummary
 import com.tosin.docprocessor.domain.document.ParseDiagnostic
+import com.tosin.docprocessor.domain.document.model.ParsedDocument
 import com.tosin.docprocessor.data.local.dao.RecentFileDao
 import com.tosin.docprocessor.data.local.entities.RecentFile
 import com.tosin.docprocessor.ui.editor.renderer.AnnotatedStringMappers
 import com.tosin.docprocessor.data.repository.DocumentRepository
+import com.tosin.docprocessor.data.writer.common.LegacyDocumentExportAdapter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -33,7 +35,8 @@ import javax.inject.Inject
 @HiltViewModel
 class EditorViewModel @Inject constructor(
     private val documentRepository: DocumentRepository,
-    private val recentFileDao: RecentFileDao
+    private val recentFileDao: RecentFileDao,
+    private val exportAdapter: LegacyDocumentExportAdapter
 ) : ViewModel() {
 
     var documentElements by mutableStateOf<List<DocumentElement>>(emptyList())
@@ -52,6 +55,7 @@ class EditorViewModel @Inject constructor(
     val diagnostics: StateFlow<List<ParseDiagnostic>> = _diagnostics.asStateFlow()
 
     private var currentUri: Uri? = null
+    private var parsedDocument: ParsedDocument = ParsedDocument()
 
     val isSaving: Boolean
         get() = _uiState.value.isSaving
@@ -97,10 +101,12 @@ class EditorViewModel @Inject constructor(
             return
         }
         val content = documentElements.toList()
+        val exportDocument = exportAdapter.adapt(content, parsedDocument)
         _uiState.value = state.copy(isSaving = true, errorMessage = null)
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { documentRepository.saveDocumentToUri(uri, content) }
+                withContext(Dispatchers.IO) { documentRepository.saveDocumentToUri(uri, exportDocument) }
+                parsedDocument = exportDocument
                 documentElements = content
                 val savedDocument = _currentDocument.value?.copy(content = content)
                 _currentDocument.value = savedDocument
@@ -158,6 +164,7 @@ class EditorViewModel @Inject constructor(
                     recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))
                     withContext(Dispatchers.Main) {
                         documentElements = elements
+                        parsedDocument = result.document
                         _currentDocument.value = document
                         _diagnostics.value = result.diagnostics
                         syncDocumentState(document)
@@ -181,7 +188,9 @@ class EditorViewModel @Inject constructor(
 
     fun closeDocument() {
         currentUri = null
+        parsedDocument = ParsedDocument()
         documentElements = emptyList()
+        parsedDocument = ParsedDocument()
         _currentDocument.value = null
         _diagnostics.value = emptyList()
         _uiState.value = EditorUiState()
@@ -295,7 +304,9 @@ class EditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _uiState.value = _uiState.value.copy(isSaving = true)
-                documentRepository.saveDocumentToUri(uri, documentElements)
+                val exportDocument = exportAdapter.adapt(documentElements, parsedDocument)
+                documentRepository.saveDocumentToUri(uri, exportDocument)
+                parsedDocument = exportDocument
                 syncDocumentState()
                 _events.emit("File saved successfully!")
             } catch (e: Exception) {
@@ -310,7 +321,9 @@ class EditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _uiState.value = _uiState.value.copy(isSaving = true)
-                documentRepository.saveDocumentToUri(uri, documentElements)
+                val exportDocument = exportAdapter.adapt(documentElements, parsedDocument)
+                documentRepository.saveDocumentToUri(uri, exportDocument)
+                parsedDocument = exportDocument
                 currentUri = uri
                 syncDocumentState()
                 _events.emit("File saved successfully!")
@@ -336,6 +349,7 @@ class EditorViewModel @Inject constructor(
                 .collect { document ->
                     withContext(Dispatchers.Main) {
                         documentElements = document.content
+                        parsedDocument = exportAdapter.adapt(document.content)
                     }
                     _currentDocument.value = document
                     syncDocumentState(document)
@@ -394,7 +408,9 @@ class EditorViewModel @Inject constructor(
             viewModelScope.launch(Dispatchers.IO) {
                 try {
                     _uiState.value = _uiState.value.copy(isSaving = true)
-                    documentRepository.saveDocumentToUri(it, documentElements)
+                    val exportDocument = exportAdapter.adapt(documentElements, parsedDocument)
+                    documentRepository.saveDocumentToUri(it, exportDocument)
+                    parsedDocument = exportDocument
                     val fileName = documentRepository.getFileName(it)
                     recentFileDao.insertFile(RecentFile(uri = it.toString(), fileName = fileName))
                     withContext(Dispatchers.Main) {

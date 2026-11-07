@@ -38,7 +38,6 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
-import java.io.OutputStream
 import java.util.zip.ZipInputStream
 
 /**
@@ -52,8 +51,6 @@ class DocxDocumentParser(
     private val resources: ResourceCollector = ResourceCollector()
 ) : DocumentParser {
 
-    private val legacySaver: DocxParser? = cacheDir?.let { DocxParser(it) }
-
     override suspend fun parse(inputStream: InputStream): Result<List<DocumentElement>> =
         parseWithReport(inputStream).map { it.content }
 
@@ -61,13 +58,6 @@ class DocxDocumentParser(
         withContext(Dispatchers.IO) {
             runCatching { parseEntries(entries) }
         }
-
-    override suspend fun save(outputStream: OutputStream, content: List<DocumentElement>): Result<Unit> {
-        val saver = legacySaver ?: return Result.failure(
-            IllegalStateException("Export disabled: rich parser is read-only. Use an export-basic-copy action.")
-        )
-        return saver.save(outputStream, content)
-    }
 
     fun parseEntries(entries: Map<String, ByteArray>): ParseResult {
         val encryptedContentType = ContentTypes.parse(entries["[Content_Types].xml"])

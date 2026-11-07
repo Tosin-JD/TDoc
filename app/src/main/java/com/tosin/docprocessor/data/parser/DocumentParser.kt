@@ -4,7 +4,6 @@ package com.tosin.docprocessor.data.parser
 import com.tosin.docprocessor.domain.model.DocumentElement
 import com.tosin.docprocessor.domain.document.ParseResult
 import java.io.InputStream
-import java.io.OutputStream
 
 interface DocumentParser {
     /**
@@ -19,9 +18,4 @@ interface DocumentParser {
      */
     suspend fun parseWithReport(inputStream: InputStream): Result<ParseResult> =
         parse(inputStream).map { ParseResult(content = it) }
-
-    /**
-     * Encodes the [content] and writes it to the [outputStream].
-     */
-    suspend fun save(outputStream: OutputStream, content: List<DocumentElement>): Result<Unit>
 }

@@ -33,6 +33,11 @@ enum class DocumentLayoutMode {
     GRID
 }
 
+enum class BrowseLocation(val title: String) {
+    RECENT("Recent"), STARRED("Starred"), DOCUMENTS("Documents"), DOWNLOADS("Download"),
+    INTERNAL_STORAGE("Internal Storage"), SD_CARD("SD Card"), OTG("OTG"), OTHERS("Others")
+}
+
 data class HomeDocumentItem(
     val uri: String,
     val name: String,
@@ -43,6 +48,7 @@ data class HomeDocumentItem(
 )
 
 data class HomeUiState(
+    val selectedLocation: BrowseLocation = BrowseLocation.RECENT,
     val searchQuery: String = "",
     val sortOption: DocumentSortOption = DocumentSortOption.LAST_OPENED,
     val layoutMode: DocumentLayoutMode = DocumentLayoutMode.LIST,
@@ -61,18 +67,32 @@ class HomeViewModel @Inject constructor(
     private val sortOption = MutableStateFlow(DocumentSortOption.LAST_OPENED)
     private val layoutMode = MutableStateFlow(DocumentLayoutMode.LIST)
     private val starredUris = MutableStateFlow(loadStarredUris())
+    private val selectedLocation = MutableStateFlow(BrowseLocation.RECENT)
 
     val uiState: StateFlow<HomeUiState> = combine(
         recentFileDao.getRecentFiles(),
         query,
         sortOption,
         layoutMode,
+        selectedLocation,
         starredUris
-    ) { recentFiles, currentQuery, currentSort, currentLayout, starred ->
+    ) { values ->
+        @Suppress("UNCHECKED_CAST")
+        val recentFiles = values[0] as List<RecentFile>
+        val currentQuery = values[1] as String
+        val currentSort = values[2] as DocumentSortOption
+        val currentLayout = values[3] as DocumentLayoutMode
+        val location = values[4] as BrowseLocation
+        @Suppress("UNCHECKED_CAST")
+        val starred = values[5] as Set<String>
         withContext(Dispatchers.IO) {
-            val documents = recentFiles
+            val resolved = recentFiles
                 .map { resolveRecentFile(it, starred.contains(it.uri)) }
-                .filter { item ->
+            val source = when (location) {
+                BrowseLocation.STARRED -> resolved.filter { it.isStarred }
+                else -> resolved
+            }
+            val documents = source.filter { item ->
                     item.mimeType == MimeTypes.DOCX || item.mimeType == MimeTypes.ODT ||
                         item.name.endsWith(".docx", ignoreCase = true) ||
                         item.name.endsWith(".odt", ignoreCase = true)
@@ -83,6 +103,7 @@ class HomeViewModel @Inject constructor(
                 .sortedWith(sortComparator(currentSort))
 
             HomeUiState(
+                selectedLocation = location,
                 searchQuery = currentQuery,
                 sortOption = currentSort,
                 layoutMode = currentLayout,
@@ -97,6 +118,10 @@ class HomeViewModel @Inject constructor(
 
     fun updateSearchQuery(value: String) {
         query.value = value
+    }
+
+    fun selectLocation(location: BrowseLocation) {
+        selectedLocation.value = location
     }
 
     fun updateSortOption(option: DocumentSortOption) {
