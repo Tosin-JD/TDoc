@@ -14,7 +14,13 @@ import com.tosin.docprocessor.domain.model.layout.TableCellLayout
 import com.tosin.docprocessor.domain.model.layout.TableRenderLayout
 import com.tosin.docprocessor.domain.model.layout.TableRowLayout
 import com.tosin.docprocessor.data.parser.internal.models.HeaderFooterKind
+import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
+import com.tosin.docprocessor.data.parser.internal.models.ParagraphStyle
+import com.tosin.docprocessor.data.parser.internal.models.RichTableCell
 import com.tosin.docprocessor.data.parser.internal.models.TextSpan
+import com.tosin.docprocessor.domain.document.model.style.CellBorders
+import com.tosin.docprocessor.domain.document.model.style.TextAlignment
+import com.tosin.docprocessor.domain.document.model.style.VerticalCellAlign
 import kotlin.math.ceil
 
 class PrintPaginator(
@@ -385,7 +391,8 @@ class PrintPaginator(
         availableHeightPt: Float,
         widthPt: Float
     ): Pair<DocumentElement?, DocumentElement?> {
-        if (element.rows.isEmpty()) return Pair(element, null)
+        val rowCount = maxOf(element.rows.size, element.richRows.size)
+        if (rowCount == 0) return Pair(element, null)
 
         val layout = buildTableLayout(element, widthPt)
         if (layout.rowLayouts.isEmpty()) return Pair(element, null)
@@ -406,21 +413,35 @@ class PrintPaginator(
             return Pair(null, element)
         }
 
-        if (rowsThatFit >= element.rows.size) {
+        if (rowsThatFit >= rowCount) {
             return Pair(element, null)
         }
 
-        val firstRows = element.rows.take(rowsThatFit)
-        val remainingRows = buildList {
-            if (element.hasHeader) {
-                add(element.rows.first())
+        fun <T> splitRows(values: List<T>): Pair<List<T>, List<T>> {
+            if (values.isEmpty()) return emptyList<T>() to emptyList()
+            val first = values.take(rowsThatFit)
+            val remaining = buildList {
+                if (element.hasHeader) add(values.first())
+                addAll(values.drop(rowsThatFit))
             }
-            addAll(element.rows.drop(rowsThatFit))
+            return first to remaining
         }
 
+        val (firstRows, remainingRows) = splitRows(element.rows)
+        val (firstRichRows, remainingRichRows) = splitRows(element.richRows)
+        val (firstRowHeights, remainingRowHeights) = splitRows(element.rowHeightsPt)
+
         return Pair(
-            element.copy(rows = firstRows),
-            element.copy(rows = remainingRows)
+            element.copy(
+                rows = firstRows,
+                richRows = firstRichRows,
+                rowHeightsPt = firstRowHeights
+            ),
+            element.copy(
+                rows = remainingRows,
+                richRows = remainingRichRows,
+                rowHeightsPt = remainingRowHeights
+            )
         )
     }
 
@@ -731,43 +752,58 @@ class PrintPaginator(
         val effectiveWidth = (widthPt - indentation.leftPt - indentation.rightPt)
             .coerceAtLeast(minTableColumnWidthPt)
 
-        val columnCount = element.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
-        val columnWidthsPt = if (element.gridColumnWidthsPt.isNotEmpty() && element.gridColumnWidthsPt.size == columnCount) {
-            val gridSum = element.gridColumnWidthsPt.sum()
-            if (gridSum > 0f) {
-                val scale = effectiveWidth / gridSum
-                allocateColumnWidths(element.gridColumnWidthsPt.map { it * scale }, effectiveWidth)
-            } else {
-                calculateColumnWidths(element.rows, effectiveWidth, columnCount)
-            }
+        val columnCount = tableColumnCount(element)
+        val grid = element.gridColumnWidthsPt
+        val columnWidthsPt = if (grid.size == columnCount && grid.sum() > 0f) {
+            val scale = effectiveWidth / grid.sum()
+            allocateColumnWidths(grid.map { it * scale }, effectiveWidth)
         } else {
-            calculateColumnWidths(element.rows, effectiveWidth, columnCount)
+            calculateColumnWidths(element, effectiveWidth, columnCount)
         }
 
-        val rowLayouts = element.rows.ifEmpty { listOf(emptyList()) }.mapIndexed { rowIndex, row ->
-            val cells = List(columnCount) { columnIndex ->
-                val text = row.getOrNull(columnIndex).orEmpty()
-                val cellWidthPt = columnWidthsPt[columnIndex]
-                val contentWidthPt = (cellWidthPt - (tableCellPaddingPt * 2f)).coerceAtLeast(20f)
-                val layout = textMeasurer.buildPlainTextLayout(
-                    text = text.ifEmpty { " " },
-                    fontSize = 9f,
-                    isBold = element.hasHeader && rowIndex == 0,
-                    widthPt = contentWidthPt,
-                    isDarkMode = isDarkMode
-                )
+        val rowCount = maxOf(element.rows.size, element.richRows.size, 1)
+        val rowCells = (0 until rowCount).map { rowIndex ->
+            buildRowCells(
+                element = element,
+                rowIndex = rowIndex,
+                columnCount = columnCount,
+                columnWidthsPt = columnWidthsPt,
+                isDarkMode = isDarkMode
+            )
+        }
 
-                TableCellLayout(
-                    text = text,
-                    widthPt = cellWidthPt,
-                    contentHeightPt = layout?.let { unitConverter.pxToPt(it.height.toFloat()) } ?: 0f,
-                    layout = layout
-                )
+        val rowHeights = FloatArray(rowCount) { rowIndex ->
+            element.rowHeightsPt.getOrNull(rowIndex)
+                ?.takeIf { it > 0f }
+                ?: MIN_TABLE_ROW_HEIGHT_PT
+        }
+
+        // Height required by cells that live entirely inside one row.
+        rowCells.forEachIndexed { rowIndex, cells ->
+            val contentHeight = cells
+                .filter { !it.isCovered && it.rowSpan == 1 }
+                .maxOfOrNull { it.contentHeightPt + verticalPadding(it) }
+                ?: 0f
+            rowHeights[rowIndex] = maxOf(rowHeights[rowIndex], contentHeight)
+        }
+
+        // Vertically merged cells grow the rows they span so their content is never clipped.
+        rowCells.forEachIndexed { rowIndex, cells ->
+            cells.filter { !it.isCovered && it.rowSpan > 1 }.forEach { cell ->
+                val endRow = (rowIndex + cell.rowSpan).coerceAtMost(rowCount)
+                if (endRow <= rowIndex) return@forEach
+                val required = cell.contentHeightPt + verticalPadding(cell)
+                val current = (rowIndex until endRow).sumOf { rowHeights[it].toDouble() }.toFloat()
+                if (current < required) {
+                    val extraPerRow = (required - current) / (endRow - rowIndex)
+                    for (row in rowIndex until endRow) rowHeights[row] += extraPerRow
+                }
             }
+        }
 
-            val rowHeight = (cells.maxOfOrNull { it.contentHeightPt } ?: 0f) + (tableCellPaddingPt * 2f)
+        val rowLayouts = rowCells.mapIndexed { rowIndex, cells ->
             TableRowLayout(
-                heightPt = rowHeight.coerceAtLeast(24f),
+                heightPt = rowHeights[rowIndex].coerceAtLeast(MIN_TABLE_ROW_HEIGHT_PT),
                 cells = cells,
                 isHeader = element.hasHeader && rowIndex == 0
             )
@@ -776,23 +812,174 @@ class PrintPaginator(
         return TableRenderLayout(
             columnCount = columnCount,
             rowLayouts = rowLayouts,
-            cellPaddingPt = tableCellPaddingPt
+            cellPaddingPt = tableCellPaddingPt,
+            gridColumnWidthsPt = columnWidthsPt
         )
     }
 
+    /** Total logical grid columns, accounting for spanning cells and explicit grids. */
+    private fun tableColumnCount(element: DocumentElement.Table): Int {
+        val richColumns = element.richRows.maxOfOrNull { row ->
+            row.sumOf { it.colSpan.coerceAtLeast(1) }
+        } ?: 0
+        val plainColumns = element.rows.maxOfOrNull { it.size } ?: 0
+        return maxOf(richColumns, plainColumns, element.gridColumnWidthsPt.size, 1)
+    }
+
+    /**
+     * Builds one dense row of [TableCellLayout]s. Horizontal spans are expanded into
+     * covered placeholders so the renderer can walk the row column-by-column.
+     */
+    private fun buildRowCells(
+        element: DocumentElement.Table,
+        rowIndex: Int,
+        columnCount: Int,
+        columnWidthsPt: List<Float>,
+        isDarkMode: Boolean
+    ): List<TableCellLayout> {
+        val richRow = element.richRows.getOrNull(rowIndex)
+        val plainRow = element.rows.getOrNull(rowIndex)
+        val output = MutableList<TableCellLayout?>(columnCount) { null }
+
+        if (richRow != null) {
+            var column = 0
+            richRow.forEach { richCell ->
+                if (column >= columnCount) return@forEach
+                val colSpan = richCell.colSpan.coerceAtLeast(1).coerceAtMost(columnCount - column)
+                val spanEnd = column + colSpan
+                val cellWidthPt = (column until spanEnd).sumOf { columnWidthsPt[it].toDouble() }.toFloat()
+                val margins = richCell.margins
+                val leftPadding = horizontalPadding(margins?.left?.widthPoints?.toFloat())
+                val rightPadding = horizontalPadding(margins?.right?.widthPoints?.toFloat())
+                val contentWidthPt = (cellWidthPt - leftPadding - rightPadding).coerceAtLeast(20f)
+                val text = richCell.spans.joinToString("") { it.text }
+
+                val layout = if (richCell.isCovered) {
+                    null
+                } else {
+                    val spans = if (element.hasHeader && rowIndex == 0) {
+                        richCell.spans.map { it.copy(isBold = true) }
+                    } else {
+                        richCell.spans
+                    }
+                    if (spans.isEmpty()) {
+                        null
+                    } else {
+                        textMeasurer.buildParagraphLayout(
+                            spans = spans,
+                            style = ParagraphStyle(alignment = richCell.horizontalAlignment.toParagraphAlignment()),
+                            widthPt = contentWidthPt,
+                            isDarkMode = isDarkMode
+                        )
+                    }
+                }
+
+                val cell = TableCellLayout(
+                    text = text,
+                    widthPt = cellWidthPt,
+                    contentHeightPt = layout?.let { unitConverter.pxToPt(it.height.toFloat()) } ?: 0f,
+                    layout = layout,
+                    isCovered = richCell.isCovered,
+                    colSpan = colSpan,
+                    rowSpan = richCell.rowSpan.coerceAtLeast(1),
+                    backgroundColor = richCell.backgroundColor,
+                    borders = richCell.borders,
+                    margins = margins,
+                    verticalAlignment = richCell.verticalAlignment
+                )
+                output[column] = cell
+
+                // Horizontal span placeholders: skip rendering, but occupy their grid slot.
+                for (offset in 1 until colSpan) {
+                    output[column + offset] = cell.copy(
+                        text = "",
+                        widthPt = columnWidthsPt[column + offset],
+                        contentHeightPt = 0f,
+                        layout = null,
+                        isCovered = true,
+                        colSpan = 1,
+                        rowSpan = 1
+                    )
+                }
+                column += colSpan
+            }
+        }
+
+        // Fill unpopulated slots from the plain-text projection (also the whole row for
+        // documents/adapters that only provide `rows`).
+        for (column in 0 until columnCount) {
+            if (output[column] != null) continue
+            val text = plainRow?.getOrNull(column).orEmpty()
+            val cellWidthPt = columnWidthsPt[column]
+            val contentWidthPt = (cellWidthPt - (tableCellPaddingPt * 2f)).coerceAtLeast(20f)
+            val layout = if (text.isBlank()) {
+                null
+            } else {
+                textMeasurer.buildPlainTextLayout(
+                    text = text,
+                    fontSize = 9f,
+                    isBold = element.hasHeader && rowIndex == 0,
+                    widthPt = contentWidthPt,
+                    isDarkMode = isDarkMode
+                )
+            }
+            output[column] = TableCellLayout(
+                text = text,
+                widthPt = cellWidthPt,
+                contentHeightPt = layout?.let { unitConverter.pxToPt(it.height.toFloat()) } ?: 0f,
+                layout = layout,
+                isCovered = false,
+                colSpan = 1,
+                rowSpan = 1
+            )
+        }
+
+        return output.map { it ?: TableCellLayout("", columnWidthsPt[0], 0f, null) }
+    }
+
+    private fun horizontalPadding(value: Float?): Float =
+        value?.takeIf { it >= 0f } ?: tableCellPaddingPt
+
+    private fun verticalPadding(cell: TableCellLayout): Float =
+        horizontalPadding(cell.margins?.top?.widthPoints?.toFloat()) +
+            horizontalPadding(cell.margins?.bottom?.widthPoints?.toFloat())
+
+    private fun TextAlignment.toParagraphAlignment(): ParagraphAlignment = when (this) {
+        TextAlignment.START -> ParagraphAlignment.START
+        TextAlignment.END -> ParagraphAlignment.END
+        TextAlignment.CENTER -> ParagraphAlignment.CENTER
+        TextAlignment.JUSTIFIED -> ParagraphAlignment.JUSTIFIED
+        TextAlignment.DISTRIBUTED -> ParagraphAlignment.DISTRIBUTED
+    }
+
     private fun calculateColumnWidths(
-        rows: List<List<String>>,
+        element: DocumentElement.Table,
         totalWidthPt: Float,
         columnCount: Int
     ): List<Float> {
         if (columnCount == 1) return listOf(totalWidthPt)
 
         val rawWeights = MutableList(columnCount) { 1f }
-        rows.forEach { row ->
+
+        element.rows.forEach { row ->
             repeat(columnCount) { columnIndex ->
                 val text = row.getOrNull(columnIndex).orEmpty()
-                val estimatedWeight = estimateColumnWeight(text)
-                rawWeights[columnIndex] = maxOf(rawWeights[columnIndex], estimatedWeight)
+                rawWeights[columnIndex] = maxOf(rawWeights[columnIndex], estimateColumnWeight(text))
+            }
+        }
+
+        element.richRows.forEach { row ->
+            var column = 0
+            row.forEach { cell ->
+                val span = cell.colSpan.coerceAtLeast(1)
+                val weight = estimateColumnWeight(cell.spans.joinToString("") { it.text }) / span
+                for (offset in 0 until span) {
+                    val index = column + offset
+                    if (index in 0 until columnCount) {
+                        rawWeights[index] = maxOf(rawWeights[index], weight)
+                    }
+                }
+                column += span
             }
         }
 
@@ -892,4 +1079,8 @@ class PrintPaginator(
 
     private fun DocumentElement.Paragraph.renderSpans(): List<TextSpan> =
         listLabel?.let { listOf(TextSpan(text = "$it ")) + spans } ?: spans
+
+    private companion object {
+        const val MIN_TABLE_ROW_HEIGHT_PT = 24f
+    }
 }

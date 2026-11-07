@@ -1,6 +1,8 @@
 package com.tosin.docprocessor.domain.model.layout
 
 import android.text.StaticLayout
+import com.tosin.docprocessor.domain.document.model.style.CellBorders
+import com.tosin.docprocessor.domain.document.model.style.VerticalCellAlign
 
 data class TableRenderLayout(
     val columnCount: Int,
@@ -24,11 +26,18 @@ data class TableCellLayout(
     val widthPt: Float,
     val contentHeightPt: Float,
     val layout: StaticLayout?,
-    /** True when this cell is a vMerge/hMerge continuation — skip rendering. */
+    /** True when this cell is an hMerge/vMerge continuation — skip rendering. */
     val isCovered: Boolean = false,
     /** Number of columns this cell spans (gridSpan). */
     val colSpan: Int = 1,
     /** Number of rows this cell spans (vMerge). */
-    val rowSpan: Int = 1
+    val rowSpan: Int = 1,
+    /** Cell background color (hex without #). */
+    val backgroundColor: String? = null,
+    /** Explicit cell borders. */
+    val borders: CellBorders? = null,
+    /** Explicit cell padding/margins in points. */
+    val margins: CellBorders? = null,
+    /** Vertical alignment within cell. */
+    val verticalAlignment: VerticalCellAlign = VerticalCellAlign.TOP
 )
-

@@ -136,9 +136,21 @@ private fun TableRowView(
             .height(IntrinsicSize.Min)
     ) {
         row.cells.forEachIndexed { cellIndex, cell ->
+            if (cell.isCovered) return@forEachIndexed
+
+            val cellWidth = if (cell.colSpan > 1) {
+                val endCol = (cellIndex + cell.colSpan).coerceAtMost(columnWidthsDp.size)
+                (cellIndex until endCol).sumOf { columnWidthsDp.getOrElse(it) { config.minColumnWidthDp }.toDouble() }.toFloat().dp
+            } else {
+                columnWidthsDp.getOrElse(cellIndex) { config.minColumnWidthDp }.dp
+            }
+
+            val cellBg = cell.backgroundColor ?: Color.Transparent
+
             Box(
                 modifier = Modifier
-                    .width(columnWidthsDp.getOrElse(cellIndex) { config.minColumnWidthDp }.dp)
+                    .width(cellWidth)
+                    .background(cellBg)
                     .padding(
                         horizontal = config.cellPaddingHorizontalDp.dp,
                         vertical = config.cellPaddingVerticalDp.dp

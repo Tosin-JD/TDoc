@@ -231,23 +231,61 @@ class PrintElementRenderer(
                     unitConverter.ptToPx(cell.widthPt).coerceAtMost(remainingWidthPx)
                 }
 
+                // If cell is covered by an hMerge/vMerge anchor, advance and skip drawing
+                if (cell.isCovered) {
+                    currentX += cellWidthPx
+                    return@forEachIndexed
+                }
+
+                // Calculate multi-row height for vertically merged cells
+                val effectiveCellHeightPx = if (cell.rowSpan > 1) {
+                    val endRow = (rowIndex + cell.rowSpan).coerceAtMost(tableLayout.rowLayouts.size)
+                    val spanHeightPt = (rowIndex until endRow).sumOf { tableLayout.rowLayouts[it].heightPt.toDouble() }.toFloat()
+                    unitConverter.ptToPx(spanHeightPt).coerceAtMost(y + height - currentY)
+                } else {
+                    rowHeightPx
+                }
+
+                // Draw cell-specific background if provided by document shading
+                cell.backgroundColor?.let { hex ->
+                    val colorInt = hex.toLongOrNull(16)?.toInt()
+                    if (colorInt != null) {
+                        val parsedColor = if (hex.length == 6) Color(colorInt or -0x1000000) else Color(colorInt)
+                        drawRect(
+                            color = parsedColor,
+                            topLeft = Offset(currentX, currentY),
+                            size = Size(cellWidthPx, effectiveCellHeightPx)
+                        )
+                    }
+                }
+
                 drawRect(
                     color = cellBorderColor,
                     topLeft = Offset(currentX, currentY),
-                    size = Size(cellWidthPx, rowHeightPx),
+                    size = Size(cellWidthPx, effectiveCellHeightPx),
                     style = Stroke(width = 1f)
                 )
 
                 if (cell.layout != null && cell.text.isNotBlank()) {
+                    val contentHeightPx = unitConverter.ptToPx(cell.contentHeightPt)
+                    val availableInnerHeightPx = (effectiveCellHeightPx - (cellPaddingPx * 2f)).coerceAtLeast(0f)
+                    val verticalOffsetPx = when (cell.verticalAlignment) {
+                        com.tosin.docprocessor.domain.document.model.style.VerticalCellAlign.CENTER ->
+                            cellPaddingPx + ((availableInnerHeightPx - contentHeightPx) / 2f).coerceAtLeast(0f)
+                        com.tosin.docprocessor.domain.document.model.style.VerticalCellAlign.BOTTOM ->
+                            cellPaddingPx + (availableInnerHeightPx - contentHeightPx).coerceAtLeast(0f)
+                        else -> cellPaddingPx
+                    }
+
                     drawIntoCanvas { canvas ->
                         canvas.nativeCanvas.save()
                         canvas.nativeCanvas.clipRect(
                             currentX + cellPaddingPx,
                             currentY + cellPaddingPx,
                             currentX + cellWidthPx - cellPaddingPx,
-                            currentY + rowHeightPx - cellPaddingPx
+                            currentY + effectiveCellHeightPx - cellPaddingPx
                         )
-                        canvas.nativeCanvas.translate(currentX + cellPaddingPx, currentY + cellPaddingPx)
+                        canvas.nativeCanvas.translate(currentX + cellPaddingPx, currentY + verticalOffsetPx)
                         cell.layout.draw(canvas.nativeCanvas)
                         canvas.nativeCanvas.restore()
                     }

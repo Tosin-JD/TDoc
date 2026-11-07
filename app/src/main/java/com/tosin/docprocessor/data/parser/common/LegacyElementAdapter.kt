@@ -18,6 +18,7 @@ import com.tosin.docprocessor.data.parser.internal.models.NoteKind
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphAlignment
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphIndentation
 import com.tosin.docprocessor.data.parser.internal.models.ParagraphSpacing
+import com.tosin.docprocessor.data.parser.internal.models.RichTableCell
 import com.tosin.docprocessor.data.parser.internal.models.SectionProperties
 import com.tosin.docprocessor.data.parser.internal.models.TableCellMetadata
 import com.tosin.docprocessor.data.parser.internal.models.TableMetadata
@@ -29,7 +30,9 @@ import com.tosin.docprocessor.domain.document.model.SourceFormat
 import com.tosin.docprocessor.domain.document.model.style.TextAlignment
 import com.tosin.docprocessor.domain.document.model.style.UnderlineKind
 import com.tosin.docprocessor.domain.document.model.style.VerticalAlign
+import com.tosin.docprocessor.domain.document.model.style.VerticalCellAlign
 import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.domain.pagination.table.TableMergeResolver
 import java.util.UUID
 
 /**
@@ -414,10 +417,37 @@ class LegacyElementAdapter {
         val rows = node.rows.map { row ->
             row.cells.map { cell -> plainText(cell.blocks) }
         }
+        val rawRichRows = node.rows.map { row ->
+            row.cells.map { cell ->
+                RichTableCell(
+                    spans = cellSpans(cell.blocks),
+                    metadata = TableCellMetadata(
+                        gridSpan = cell.style.gridSpan,
+                        verticalMerge = cell.style.verticalMerge.name.lowercase(),
+                        shadingColor = cell.style.shading?.fill
+                    ),
+                    colSpan = cell.style.gridSpan.coerceAtLeast(1),
+                    rowSpan = 1,
+                    isCovered = false,
+                    backgroundColor = cell.style.shading?.fill?.removePrefix("#"),
+                    borders = cell.style.borders,
+                    margins = cell.style.margins,
+                    verticalAlignment = cell.style.verticalAlign ?: VerticalCellAlign.TOP,
+                    horizontalAlignment = cellHorizontalAlignment(cell.blocks),
+                    widthPoints = cell.style.widthPoints?.toFloat()
+                )
+            }
+        }
+        val richRows = TableMergeResolver.resolve(rawRichRows)
+
         val metadata = TableMetadata(
             styleId = node.style.styleId,
             caption = node.style.caption,
             description = node.style.description,
+            shadingColor = node.style.shading?.fill,
+            borders = node.style.borders,
+            cellMarginsPt = node.style.cellMargins,
+            alignment = node.style.alignment,
             rows = node.rows.map { row ->
                 row.cells.map { cell ->
                     TableCellMetadata(
@@ -433,9 +463,71 @@ class LegacyElementAdapter {
             rows = rows,
             hasHeader = node.rows.firstOrNull()?.isHeader == true,
             metadata = metadata,
-            gridColumnWidthsPt = gridColumnWidthsPt
+            richRows = richRows,
+            gridColumnWidthsPt = gridColumnWidthsPt,
+            rowHeightsPt = node.rows.map { it.heightPoints?.toFloat() ?: 0f }
         )
     }
+
+    /**
+     * Flattens a cell's blocks into styled spans, keeping paragraph boundaries as
+     * line breaks (instead of collapsing everything into an unstyled blob).
+     */
+    private fun cellSpans(blocks: List<BlockNode>): List<TextSpan> {
+        val output = mutableListOf<TextSpan>()
+
+        fun append(block: BlockNode) {
+            when (block) {
+                is BlockNode.Paragraph -> {
+                    if (output.isNotEmpty()) output += TextSpan(text = "\n")
+                    block.listMarker?.text?.let { output += TextSpan(text = "$it ") }
+                    output += spans(block.inlines).spans
+                }
+
+                is BlockNode.Heading -> {
+                    if (output.isNotEmpty()) output += TextSpan(text = "\n")
+                    output += spans(block.inlines).spans
+                }
+
+                is BlockNode.ListBlock -> block.items.forEach { item ->
+                    item.blocks.forEach(::append)
+                }
+
+                is BlockNode.ListItem -> block.blocks.forEach(::append)
+                is BlockNode.TextBox -> block.blocks.forEach(::append)
+                is BlockNode.RevisionBlock -> block.blocks.forEach(::append)
+                is BlockNode.NoteBody -> block.blocks.forEach(::append)
+
+                is BlockNode.Table -> {
+                    if (output.isNotEmpty()) output += TextSpan(text = "\n")
+                    output += TextSpan(text = plainText(listOf(block)))
+                }
+
+                is BlockNode.Figure -> {
+                    val text = block.altText ?: inlineText(block.caption)
+                    if (text.isNotEmpty()) output += TextSpan(text = text)
+                }
+
+                else -> Unit
+            }
+        }
+
+        blocks.forEach(::append)
+        if (output.isEmpty()) {
+            val text = plainText(blocks)
+            if (text.isNotEmpty()) output += TextSpan(text = text)
+        }
+        return output
+    }
+
+    private fun cellHorizontalAlignment(blocks: List<BlockNode>): TextAlignment =
+        blocks.firstNotNullOfOrNull { block ->
+            when (block) {
+                is BlockNode.Paragraph -> block.style.alignment
+                is BlockNode.Heading -> block.style.alignment
+                else -> null
+            }
+        } ?: TextAlignment.START
 
     private fun figure(node: BlockNode.Figure): List<DocumentElement> {
         val text = inlineText(node.caption)

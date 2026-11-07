@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import java.io.File
 import com.tosin.docprocessor.domain.document.model.ParsedDocument
+import com.tosin.docprocessor.data.writer.common.DocumentTemplateFactory
 import javax.inject.Inject
 
 class DocumentRepositoryImpl @Inject constructor(
@@ -102,7 +103,7 @@ class DocumentRepositoryImpl @Inject constructor(
         val fileName = getFileName(uri)
         val mimeType = DocumentOutputFormatResolver.resolve(fileName, context.contentResolver.getType(uri))
         context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-            writeDocument(ParsedDocument(), mimeType, outputStream, emptyList())
+            writeDocument(DocumentTemplateFactory.createDefault(mimeType), mimeType, outputStream, emptyList())
         } ?: throw IllegalStateException("Could not open output stream for URI: $uri")
     }
 

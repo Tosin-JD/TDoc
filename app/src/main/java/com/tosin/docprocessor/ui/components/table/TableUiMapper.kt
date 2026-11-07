@@ -1,6 +1,8 @@
 package com.tosin.docprocessor.ui.components.table
 
+import androidx.compose.ui.graphics.Color
 import com.tosin.docprocessor.domain.model.DocumentElement
+import com.tosin.docprocessor.ui.components.table.model.CellTextAlignment
 import com.tosin.docprocessor.ui.components.table.model.TableCellUi
 import com.tosin.docprocessor.ui.components.table.model.TableRowUi
 import com.tosin.docprocessor.ui.components.table.model.TableUiModel
@@ -18,20 +20,53 @@ class TableUiMapper {
         }
 
         val columnCount = table.rows.maxOf { it.size }.coerceAtLeast(1)
+        val hasRich = table.richRows.isNotEmpty()
 
         val rows = table.rows.mapIndexed { index, cells ->
+            val richRow = table.richRows.getOrNull(index)
             TableRowUi(
                 cells = List(columnCount) { column ->
-                    TableCellUi(text = cells.getOrNull(column).orEmpty())
+                    val richCell = richRow?.getOrNull(column)
+                    if (richCell != null) {
+                        val text = richCell.spans.joinToString("") { it.text }.ifEmpty { cells.getOrNull(column).orEmpty() }
+                        val bgColor = richCell.backgroundColor?.let { hex ->
+                            val colorInt = hex.toLongOrNull(16)?.toInt()
+                            if (colorInt != null) {
+                                if (hex.length == 6) Color(colorInt or -0x1000000) else Color(colorInt)
+                            } else null
+                        }
+                        val alignment = when (richCell.horizontalAlignment) {
+                            com.tosin.docprocessor.domain.document.model.style.TextAlignment.CENTER -> CellTextAlignment.CENTER
+                            com.tosin.docprocessor.domain.document.model.style.TextAlignment.END -> CellTextAlignment.END
+                            else -> CellTextAlignment.START
+                        }
+                        TableCellUi(
+                            text = text,
+                            alignment = alignment,
+                            colSpan = richCell.colSpan,
+                            rowSpan = richCell.rowSpan,
+                            isCovered = richCell.isCovered,
+                            backgroundColor = bgColor,
+                            spans = richCell.spans
+                        )
+                    } else {
+                        TableCellUi(text = cells.getOrNull(column).orEmpty())
+                    }
                 },
                 isHeader = table.hasHeader && index == 0
             )
         }
 
+        val weights = if (table.gridColumnWidthsPt.size == columnCount) {
+            table.gridColumnWidthsPt.map { it.coerceAtLeast(1f) }
+        } else {
+            estimateWeights(table.rows, columnCount)
+        }
+
         return TableUiModel(
             columnCount = columnCount,
             rows = rows,
-            columnWeights = estimateWeights(table.rows, columnCount)
+            columnWeights = weights
         )
     }
 

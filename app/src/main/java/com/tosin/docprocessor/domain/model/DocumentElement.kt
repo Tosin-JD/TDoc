@@ -23,7 +23,9 @@ sealed class DocumentElement {
         /** Rich per-cell content carrying styled spans. Populated by [LegacyElementAdapter]. */
         val richRows: List<List<com.tosin.docprocessor.data.parser.internal.models.RichTableCell>> = emptyList(),
         /** Parsed column grid widths in points (from `w:tblGrid`). Empty = use heuristic. */
-        val gridColumnWidthsPt: List<Float> = emptyList()
+        val gridColumnWidthsPt: List<Float> = emptyList(),
+        /** Explicit row heights in points (from `w:trHeight`); 0 = unspecified. */
+        val rowHeightsPt: List<Float> = emptyList()
     ) : DocumentElement()
 
 

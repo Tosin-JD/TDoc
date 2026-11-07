@@ -70,7 +70,9 @@ class DocxBlockMapper(private val context: DocxMapContext) {
                 }
                 child.matchesNs(Ns.W, "bookmarkStart") || child.matchesNs(Ns.W, "bookmarkEnd") ||
                     child.matchesNs(Ns.W, "commentRangeStart") || child.matchesNs(Ns.W, "commentRangeEnd") ||
-                    child.matchesNs(Ns.W, "proofErr") -> Unit
+                    child.matchesNs(Ns.W, "proofErr") || child.matchesNs(Ns.W, "tcPr") ||
+                    child.matchesNs(Ns.W, "tblPr") || child.matchesNs(Ns.W, "trPr") ||
+                    child.matchesNs(Ns.W, "pPr") -> Unit
                 else -> {
                     context.diagnostics.preserve("w:${child.localName ?: child.nodeName}", "body")
                     blocks += BlockNode.Opaque(

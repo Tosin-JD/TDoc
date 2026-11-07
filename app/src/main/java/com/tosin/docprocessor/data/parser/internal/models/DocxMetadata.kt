@@ -1,5 +1,8 @@
 package com.tosin.docprocessor.data.parser.internal.models
 
+import com.tosin.docprocessor.domain.document.model.style.CellBorders
+import com.tosin.docprocessor.domain.document.model.style.TextAlignment
+
 data class HyperlinkInfo(
     val address: String? = null,
     val anchor: String? = null,
@@ -147,7 +150,13 @@ data class TableMetadata(
     val shadingColor: String? = null,
     val borderSummary: String? = null,
     val cellMargins: EdgeInsets = EdgeInsets(),
-    val rows: List<List<TableCellMetadata>> = emptyList()
+    val rows: List<List<TableCellMetadata>> = emptyList(),
+    /** Table-level borders (`w:tblBorders`) used as a fallback for cells without their own. */
+    val borders: CellBorders = CellBorders(),
+    /** Table-level default cell padding/margins in points (`w:tblCellMar`). */
+    val cellMarginsPt: CellBorders? = null,
+    /** Table alignment (`w:jc`) mapped to the document horizontal alignment. */
+    val alignment: TextAlignment? = null
 )
 
 data class TableCellMetadata(

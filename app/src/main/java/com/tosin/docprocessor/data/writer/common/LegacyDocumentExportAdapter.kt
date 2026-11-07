@@ -40,16 +40,7 @@ class LegacyDocumentExportAdapter @Inject constructor() {
                     level = element.level,
                     style = paragraphStyle(element.style)
                 )
-                is DocumentElement.Table -> BlockNode.Table(
-                    rows = element.rows.map { row ->
-                        BlockNode.TableRow(
-                            cells = row.map { value ->
-                                BlockNode.TableCell(listOf(BlockNode.Paragraph(listOf(InlineNode.Text(value)))))
-                            },
-                            isHeader = element.hasHeader
-                        )
-                    }
-                )
+                is DocumentElement.Table -> exportTable(element)
                 is DocumentElement.Image -> {
                     val resourceId = imageIds.takeIf { it.hasNext() }?.next() ?: element.sourceUri
                     if (resourceId == element.sourceUri && !resources.containsKey(resourceId)) {
@@ -77,6 +68,103 @@ class LegacyDocumentExportAdapter @Inject constructor() {
             }
         }
         return source.copy(blocks = blocks, resources = resources)
+    }
+
+    /**
+     * Converts a [DocumentElement.Table] back to [BlockNode.Table], preserving
+     * rich styling from [DocumentElement.Table.richRows] when available.
+     *
+     * When rich rows are present they take precedence over the flat [DocumentElement.Table.rows]
+     * because they carry cell-level borders, shading, merge metadata, and styled spans.
+     * The flat rows are used as a plain-text fallback when no rich data is available.
+     */
+    private fun exportTable(element: DocumentElement.Table): BlockNode.Table {
+        val hasRich = element.richRows.isNotEmpty() &&
+            element.richRows.size == element.rows.size
+
+        val blockRows = if (hasRich) {
+            element.richRows.mapIndexed { rowIndex, richCells ->
+                val isHeader = element.hasHeader && rowIndex == 0
+                val rowHeightPt = element.rowHeightsPt.getOrElse(rowIndex) { 0f }
+                    .takeIf { it > 0f }?.toDouble()
+                BlockNode.TableRow(
+                    cells = richCells.map { richCell ->
+                        val inlines: List<InlineNode> = if (richCell.spans.isNotEmpty()) {
+                            richCell.spans.map { span -> inline(span) }
+                        } else {
+                            listOf(InlineNode.Text(""))
+                        }
+                        val shading = richCell.backgroundColor?.let { hex ->
+                            com.tosin.docprocessor.domain.document.model.style.Shading(fill = hex)
+                        }
+                        val cellAlignment = when (richCell.horizontalAlignment) {
+                            com.tosin.docprocessor.domain.document.model.style.TextAlignment.END ->
+                                com.tosin.docprocessor.domain.document.model.style.TextAlignment.END
+                            com.tosin.docprocessor.domain.document.model.style.TextAlignment.CENTER ->
+                                com.tosin.docprocessor.domain.document.model.style.TextAlignment.CENTER
+                            else ->
+                                com.tosin.docprocessor.domain.document.model.style.TextAlignment.START
+                        }
+                        val paragraph = BlockNode.Paragraph(
+                            inlines = inlines,
+                            style = ExportParagraphStyle(
+                                alignment = cellAlignment
+                            )
+                        )
+                        BlockNode.TableCell(
+                            blocks = listOf(paragraph),
+                            style = com.tosin.docprocessor.domain.document.model.style.CellStyle(
+                                gridSpan = richCell.colSpan.coerceAtLeast(1),
+                                verticalMerge = when {
+                                    richCell.isCovered -> com.tosin.docprocessor.domain.document.model.style.VerticalMerge.CONTINUE
+                                    richCell.rowSpan > 1 -> com.tosin.docprocessor.domain.document.model.style.VerticalMerge.RESTART
+                                    else -> com.tosin.docprocessor.domain.document.model.style.VerticalMerge.NONE
+                                },
+                                borders = richCell.borders ?: com.tosin.docprocessor.domain.document.model.style.CellBorders(),
+                                shading = shading,
+                                verticalAlign = richCell.verticalAlignment,
+                                margins = richCell.margins
+                            )
+                        )
+                    },
+                    isHeader = isHeader,
+                    heightPoints = rowHeightPt
+                )
+            }
+        } else {
+            // Fallback to flat text rows when richRows is unavailable
+            element.rows.mapIndexed { rowIndex, cells ->
+                val isHeader = element.hasHeader && rowIndex == 0
+                BlockNode.TableRow(
+                    cells = cells.map { value ->
+                        BlockNode.TableCell(
+                            blocks = listOf(BlockNode.Paragraph(listOf(InlineNode.Text(value))))
+                        )
+                    },
+                    isHeader = isHeader
+                )
+            }
+        }
+
+        // Build table-level style from metadata
+        val tableBorders = element.metadata.borders
+        val tableShading = element.metadata.shadingColor?.let { hex ->
+            com.tosin.docprocessor.domain.document.model.style.Shading(fill = hex)
+        }
+        val tableStyle = com.tosin.docprocessor.domain.document.model.style.TableStyle(
+            styleId = element.metadata.styleId,
+            borders = tableBorders,
+            shading = tableShading,
+            caption = element.metadata.caption,
+            description = element.metadata.description
+        )
+        val gridColumns = element.gridColumnWidthsPt.map { it.toDouble() }
+
+        return BlockNode.Table(
+            style = tableStyle,
+            gridColumns = gridColumns,
+            rows = blockRows
+        )
     }
 
     private fun inline(span: TextSpan): InlineNode {
